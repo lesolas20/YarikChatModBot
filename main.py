@@ -69,14 +69,27 @@ def format_log(
     message_text: str,
     comment: str
 ) -> str:
+    def form_message_block(text: str) -> str:
+        text = text.replace("\n", " ")
+
+        rows = (len(text) // 68) + bool(len(text) % 68)
+
+        message_block = ""
+        for row in range(rows):
+            start = (row * 68)
+            end = ((row + 1) * 68)
+            message_block += f"\n| {text[start:end]:68.68} |"
+
+        return message_block
+
     return "".join(
         (
             f"\r+{18 * '—'}+{29 * '—'}+{21 * '—'}+",
-            f"\n| {chat_id:16} | {chat_title!s:27.27} | {message_date!s:.19} |",
+            f"\n| {chat_id:16} | {chat_title:27.27} | {message_date!s:.19} |",
             f"\n+{18 * '—'}+{29 * '—'}+{21 * '—'}+",
-            f"\n| {user_id:16} | {user_name!s:49.49} |",
+            f"\n| {user_id:16} | {user_name:49.49} |",
             f"\n+{18 * '—'}+{51 * '—'}+",
-            f"\n| {message_text!s:68.68} |",
+            form_message_block(message_text),
             f"\n+{70 * '—'}+",
             f"\n| {comment:68} |",
             f"\n+{70 * '—'}+"
@@ -91,11 +104,11 @@ def log(
 ) -> None:
     text = format_log(
         message.chat.id,
-        message.chat.title,
+        str(message.chat.title),
         message.from_user.id,
-        message.from_user.full_name,
+        str(message.from_user.full_name),
         message.date,
-        message.text,
+        str(message.text),
         comment
     )
 
