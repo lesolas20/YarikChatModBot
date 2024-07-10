@@ -41,6 +41,7 @@ def is_trusted(message: Message) -> bool:
         (
             message.from_user.is_bot,
             (message.from_user.id in ADMIN_IDS[message.chat.id]),
+            (message.from_user.id == 777000),
         )
     )
 
