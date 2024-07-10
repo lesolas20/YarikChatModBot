@@ -101,11 +101,7 @@ def format_log(
     )
 
 
-def log(
-    message: Message,
-    comment: str,
-    notify_bot_admin: bool = False
-) -> None:
+def log(message: Message, comment: str) -> None:
     text = format_log(
         message.chat.id,
         str(message.chat.title),
