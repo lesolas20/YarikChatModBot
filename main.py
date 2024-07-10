@@ -13,6 +13,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest
 
+from unidecode import unidecode
+
 
 TOKEN: str = ""
 
@@ -25,6 +27,7 @@ dispatcher = Dispatcher()
 
 
 def normalize(text: str) -> str:
+    text = unidecode(text)
     text = text.lower()
     text = text.replace(" ", "")
     text = text.replace("\n", "")
