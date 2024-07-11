@@ -18,6 +18,7 @@ from unidecode import unidecode
 
 TOKEN: str = ""
 
+LATIN_TO_CYRILLIC: dict[int: str, ...] = {}
 BANNED_PHRASES: list[str, ...] = []
 VALID_CHATS: list[int, ...] = []
 VALIDATORS: list[Callable[[Message], bool], ...] = []
@@ -27,6 +28,7 @@ dispatcher = Dispatcher()
 
 
 def normalize(text: str) -> str:
+    text = text.translate(LATIN_TO_CYRILLIC)
     text = unidecode(text)
     text = text.lower()
     text = text.replace(" ", "")
@@ -177,6 +179,12 @@ if __name__ == "__main__":
     load_dotenv()
 
     TOKEN: str = getenv("TOKEN")
+
+    with open("latin2cyrillic.json", "r") as file:
+        file_text = file.read()
+    LATIN_TO_CYRILLIC: dict[int: str, ...] = str.maketrans(
+        json.loads(file_text)
+    )
 
     with open("banned_phrases.json", "r") as file:
         file_text = file.read()
