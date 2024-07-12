@@ -146,6 +146,11 @@ async def message_handler(message: Message) -> None:
             log(message, "Failed to block the user.")
 
 
+@dispatcher.edited_message()
+async def edited_message_handler(message: Message) -> None:
+    await message_handler(message)
+
+
 async def main() -> None:
     global ADMIN_IDS
 
