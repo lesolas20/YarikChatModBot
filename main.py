@@ -1,7 +1,7 @@
 from os import getenv
 from dotenv import load_dotenv
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from collections.abc import Callable
@@ -16,6 +16,9 @@ from aiogram.exceptions import TelegramBadRequest
 
 from unidecode import unidecode
 
+
+LOG_PATH: str = "log.jsonl"
+DATE_FORMAT: str = "%d.%m.%Y %H:%M:%S"
 
 TOKEN: str = ""
 
@@ -110,12 +113,74 @@ def log(message: Message | None, comment: str) -> None:
             str(message.from_user.full_name),
             message.date.astimezone(
                 ZoneInfo("Europe/Kyiv")
-            ).strftime("%d.%m.%Y %H:%M:%S"),
+            ).strftime(DATE_FORMAT),
             str(message.text),
             comment
         )
 
     logger.info(text)
+
+
+def get_log_entries(
+    filename: str,
+    start: datetime,
+    end: datetime
+) -> list[str, ...]:
+    def format_entry(entry: dict) -> str:
+        mtml = message_text_max_length = 2048
+        placeholder = "..."
+
+        message_text = entry["text"]
+
+        if (message_text is not None):
+            if (len(message_text) > message_text_max_length):
+                message_text_length = mtml - len(placeholder + 1)
+                message_text = message_text[message_text_length]
+
+        return "\n".join(
+            (
+                f"Date: {entry['date']}",
+                f"Comment: {entry['comment']}",
+                f"User ID: {entry['user_id']}",
+                f"User name: {entry['user_name']}",
+                f"Chat ID: {entry['chat_id']}",
+                f"Chat title: {entry['chat_title']}",
+                f"Message text: {message_text}"
+            )
+        )
+
+    def stop_search(date: datetime) -> bool:
+        min_delta_to_terminate = timedelta(hours=1)
+
+        if (date is None):
+            return False
+
+        return any(
+            (
+                ((start - date) > min_delta_to_terminate),
+                ((date - end) > min_delta_to_terminate)
+            )
+        )
+
+    entries = []
+
+    with open(filename, "r") as file:
+        file_lines = file.readlines()
+
+    for line in file_lines[::-1]:
+        entry = json.loads(line)
+
+        if entry["date"] is None:
+            date = None
+        else:
+            date = datetime.strptime(entry["date"], DATE_FORMAT)
+
+        if stop_search(date):
+            break
+        elif (date is None) or ((date >= start) and (date <= end)):
+            entries.append(format_entry(entry))
+
+    return entries[::-1]
 
 
 @dispatcher.message(F.chat.type == "private")
@@ -124,7 +189,39 @@ async def private_message_handler(message: Message) -> None:
 
     admin_ids = [admin["id"] for admin in ADMINS]
     if (message.from_user.id in admin_ids) and message.text:
-        ...
+
+        if message.text.startswith("/log"):
+            units_table = {"m": "minutes", "h": "hours" , "d": "days"}
+
+            unit = message.text[-1]
+
+            if unit in units_table.keys():
+                value = message.text[4:-1][:9]
+
+                try:
+                    value = int(value)
+                except ValueError:
+                    value = 0
+
+                if value > 0:
+                    unit = units_table[unit]
+
+                    now = datetime.now()
+                    delta = timedelta(**{unit: value})
+                    start = now - delta
+
+                    entries = get_log_entries(
+                        filename=LOG_PATH,
+                        start=start,
+                        end=now
+                    )
+
+                    for entry in entries:
+                        await message.answer(entry)
+
+                    return
+
+    await message.answer("Invalid command")
 
 
 @dispatcher.message()
@@ -177,7 +274,6 @@ async def main() -> None:
             ]
         )
 
-    # TODO
     _admins = ", ".join(
         [f"{admin['name']} ({admin['id']})" for admin in ADMINS]
     )
@@ -195,7 +291,7 @@ if __name__ == "__main__":
 
     formatter = logging.Formatter("%(message)s")
 
-    file_handler = logging.FileHandler("log.jsonl")
+    file_handler = logging.FileHandler(LOG_PATH)
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
 
