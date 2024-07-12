@@ -2,6 +2,7 @@ from os import getenv
 from dotenv import load_dotenv
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from collections.abc import Callable
 
@@ -67,52 +68,52 @@ def validate_text(message: Message) -> bool:
 
 
 def format_log(
-    chat_id: int,
-    chat_title: str,
-    user_id: int,
-    user_name: str,
-    message_date: datetime,
-    message_text: str,
-    comment: str
+    chat_id: int | None,
+    chat_title: str | None,
+    user_id: int | None,
+    user_name: str | None,
+    message_date: str | None,
+    message_text: str | None,
+    comment: str | None
 ) -> str:
-    def form_message_block(text: str) -> str:
-        text = text.replace("\n", " ")
+    return json.dumps(
+        {
+            "date": message_date,
+            "comment": comment,
+            "user_id": user_id,
+            "user_name": user_name,
+            "chat_id": chat_id,
+            "chat_title": chat_title,
+            "text": message_text
+        },
+        ensure_ascii=False
+    )
 
-        rows = (len(text) // 68) + bool(len(text) % 68)
 
-        message_block = ""
-        for row in range(rows):
-            start = (row * 68)
-            end = ((row + 1) * 68)
-            message_block += f"\n| {text[start:end]:68.68} |"
-
-        return message_block
-
-    return "".join(
-        (
-            f"\r+{18 * '—'}+{29 * '—'}+{21 * '—'}+",
-            f"\n| {chat_id:16} | {chat_title:27.27} | {message_date!s:.19} |",
-            f"\n+{18 * '—'}+{29 * '—'}+{21 * '—'}+",
-            f"\n| {user_id:16} | {user_name:49.49} |",
-            f"\n+{18 * '—'}+{51 * '—'}+",
-            form_message_block(message_text),
-            f"\n+{70 * '—'}+",
-            f"\n| {comment:68} |",
-            f"\n+{70 * '—'}+"
+def log(message: Message | None, comment: str) -> None:
+    if message is None:
+        text = format_log(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            comment
         )
-    )
 
-
-def log(message: Message, comment: str) -> None:
-    text = format_log(
-        message.chat.id,
-        str(message.chat.title),
-        message.from_user.id,
-        str(message.from_user.full_name),
-        message.date,
-        str(message.text),
-        comment
-    )
+    else:
+        text = format_log(
+            message.chat.id,
+            str(message.chat.title),
+            message.from_user.id,
+            str(message.from_user.full_name),
+            message.date.astimezone(
+                ZoneInfo("Europe/Kyiv")
+            ).strftime("%d.%m.%Y %H:%M:%S"),
+            str(message.text),
+            comment
+        )
 
     logger.info(text)
 
@@ -176,8 +177,11 @@ async def main() -> None:
             ]
         )
 
-    _admins = json.dumps(ADMINS, indent=4, ensure_ascii=False)
-    logger.info(f"\rCurrent admins: {_admins}\n")
+    # TODO
+    _admins = ", ".join(
+        [f"{admin['name']} ({admin['id']})" for admin in ADMINS]
+    )
+    log(None, f"Current admins: {_admins}")
 
     # Run events dispatching
     await dispatcher.start_polling(bot)
@@ -191,7 +195,7 @@ if __name__ == "__main__":
 
     formatter = logging.Formatter("%(message)s")
 
-    file_handler = logging.FileHandler("log.txt")
+    file_handler = logging.FileHandler("log.jsonl")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
 
