@@ -9,7 +9,7 @@ import json
 import logging
 import asyncio
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest
 
@@ -22,7 +22,7 @@ LATIN_TO_CYRILLIC: dict[int: str, ...] = {}
 BANNED_PHRASES: list[str, ...] = []
 VALID_CHATS: list[int, ...] = []
 VALIDATORS: list[Callable[[Message], bool], ...] = []
-ADMIN_IDS: dict[int: list[int, ...], ...] = {}
+ADMINS: list[dict[str: str, str: int], ...] = []
 
 dispatcher = Dispatcher()
 
@@ -45,7 +45,7 @@ def is_trusted(message: Message) -> bool:
     return any(
         (
             message.from_user.is_bot,
-            (message.from_user.id in ADMIN_IDS[message.chat.id]),
+            (message.from_user.id in [admin["id"] for admin in ADMINS]),
             (message.from_user.id == 777000),
         )
     )
@@ -117,6 +117,15 @@ def log(message: Message, comment: str) -> None:
     logger.info(text)
 
 
+@dispatcher.message(F.chat.type == "private")
+async def private_message_handler(message: Message) -> None:
+    log(message, "The private message is recieved.")
+
+    admin_ids = [admin["id"] for admin in ADMINS]
+    if (message.from_user.id in admin_ids) and message.text:
+        ...
+
+
 @dispatcher.message()
 async def message_handler(message: Message) -> None:
     log(message, "The message is recieved.")
@@ -152,7 +161,7 @@ async def edited_message_handler(message: Message) -> None:
 
 
 async def main() -> None:
-    global ADMIN_IDS
+    global ADMINS
 
     # Create bot
     bot = Bot(token=TOKEN)
@@ -160,7 +169,15 @@ async def main() -> None:
     # Get admins of all supported chats
     for chat_id in VALID_CHATS:
         admins = await bot.get_chat_administrators(chat_id=chat_id)
-        ADMIN_IDS[chat_id] = [admin.user.id for admin in admins]
+        ADMINS.extend(
+            [
+                {"name": admin.user.full_name, "id": admin.user.id}
+                for admin in admins
+            ]
+        )
+
+    _admins = json.dumps(ADMINS, indent=4, ensure_ascii=False)
+    logger.info(f"\rCurrent admins: {_admins}\n")
 
     # Run events dispatching
     await dispatcher.start_polling(bot)
