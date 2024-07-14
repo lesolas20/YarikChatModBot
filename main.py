@@ -216,8 +216,11 @@ async def private_message_handler(message: Message) -> None:
                         end=now
                     )
 
-                    for entry in entries:
-                        await message.answer(entry)
+                    if entries:
+                        for entry in entries:
+                            await message.answer(entry)
+                    else:
+                        await message.answer("No data available")
 
                     return
 
