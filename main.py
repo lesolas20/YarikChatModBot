@@ -22,6 +22,8 @@ DATE_FORMAT: str = "%d.%m.%Y %H:%M:%S"
 
 TOKEN: str = ""
 
+BOT = None
+
 LATIN_TO_CYRILLIC: dict[int: str, ...] = {}
 BANNED_PHRASES: list[str, ...] = []
 VALID_CHATS: list[int, ...] = []
@@ -70,11 +72,92 @@ def validate_text(message: Message) -> bool:
     return True
 
 
+def parse_log_command(message: Message) -> dict[str: int] | None:
+    message_text = message.text
+
+    # Maximum allowed command length is 13:
+    #     4 ("/log") + 8 (time value) + 1 (time unit)
+    # Minimum allowed command length is 6:
+    #     4 ("/log") + 1 (time value) + 1 (time unit)
+    if (len(message_text) > 13) or (len(message_text) < 6):
+        return None
+
+    units_table = {"m": "minutes", "h": "hours" , "d": "days"}
+
+    unit = message_text[-1]
+
+    if unit in units_table.keys():
+        value = message_text[4:-1]
+
+        try:
+            value = int(value)
+        except ValueError:
+            return None
+
+        if value > 0:
+            unit = units_table[unit]
+            return {unit: value}
+
+    return None
+
+
+def parse_ban_command(
+    message: Message
+) -> dict[str: int, str: int, str: int] | None:
+    message_text = message.text
+
+    # Maximum allowed command length is 52:
+    #     4 ("/ban") + 16 (chat ID) + 16 (user ID) + 16 (message ID)\
+    #     + 3 (whitespaces)
+    # Minimum allowed command length is 16:
+    #     4 ("/ban") + 4 (chat ID) + 4 (user ID) + 1 (message ID)\
+    #     + 3 (whitespaces)
+    if (len(message_text) > 52) or (len(message_text) < 16):
+        return None
+
+    parts = message_text.split(" ")
+    if len(parts) == 4:
+        _, chat_id, user_id, message_id = parts
+
+        try:
+            chat_id = int(chat_id)
+            user_id = int(user_id)
+            message_id = int(message_id)
+        except ValueError:
+            return None
+
+        return {
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "message_id": message_id
+        }
+
+    return None
+
+
+async def ban_user(
+    message: Message,
+    chat_id: int,
+    user_id: int,
+    message_id: int
+) -> None:
+    try:
+        await BOT.delete_message(chat_id=chat_id, message_id=message_id)
+        await BOT.ban_chat_member(chat_id=chat_id, user_id=user_id)
+
+    except TelegramBadRequest:
+        log(message, "Failed to block the user.")
+
+    else:
+        log(message, "The user is successfully blocked.")
+
+
 def format_log(
     chat_id: int | None,
     chat_title: str | None,
     user_id: int | None,
     user_name: str | None,
+    message_id: int | None,
     message_date: str | None,
     message_text: str | None,
     comment: str | None
@@ -85,6 +168,7 @@ def format_log(
             "comment": comment,
             "user_id": user_id,
             "user_name": user_name,
+            "message_id": message_id,
             "chat_id": chat_id,
             "chat_title": chat_title,
             "text": message_text
@@ -101,6 +185,9 @@ def log(message: Message | None, comment: str) -> None:
             None,
             None,
             None,
+            datetime.now().astimezone(
+                ZoneInfo("Europe/Kyiv")
+            ).strftime(DATE_FORMAT),
             None,
             comment
         )
@@ -111,6 +198,7 @@ def log(message: Message | None, comment: str) -> None:
             str(message.chat.title),
             message.from_user.id,
             str(message.from_user.full_name),
+            message.message_id,
             message.date.astimezone(
                 ZoneInfo("Europe/Kyiv")
             ).strftime(DATE_FORMAT),
@@ -168,6 +256,9 @@ def get_log_entries(
         file_lines = file.readlines()
 
     for line in file_lines[::-1]:
+        if len(line) < 2:
+            continue
+
         entry = json.loads(line)
 
         if entry["date"] is None:
@@ -191,38 +282,35 @@ async def private_message_handler(message: Message) -> None:
     if (message.from_user.id in admin_ids) and message.text:
 
         if message.text.startswith("/log"):
-            units_table = {"m": "minutes", "h": "hours" , "d": "days"}
+            command = parse_log_command(message)
+            if command is not None:
+                now = datetime.now()
+                delta = timedelta(**command)
+                start = now - delta
 
-            unit = message.text[-1]
+                entries = get_log_entries(
+                    filename=LOG_PATH,
+                    start=start,
+                    end=now
+                )
 
-            if unit in units_table.keys():
-                value = message.text[4:-1][:9]
+                if entries:
+                    for entry in entries:
+                        await message.answer(entry)
+                    log(message, "Displayed the logs.")
 
-                try:
-                    value = int(value)
-                except ValueError:
-                    value = 0
+                else:
+                    await message.answer("No data available")
+                    log(message, "No logs data to display.")
 
-                if value > 0:
-                    unit = units_table[unit]
+                return
 
-                    now = datetime.now()
-                    delta = timedelta(**{unit: value})
-                    start = now - delta
+        elif message.text.startswith("/ban"):
+            command = parse_ban_command(message)
+            if command is not None:
+                await ban_user(message, **command)
 
-                    entries = get_log_entries(
-                        filename=LOG_PATH,
-                        start=start,
-                        end=now
-                    )
-
-                    if entries:
-                        for entry in entries:
-                            await message.answer(entry)
-                    else:
-                        await message.answer("No data available")
-
-                    return
+                return
 
     await message.answer("Invalid command")
 
@@ -243,17 +331,13 @@ async def message_handler(message: Message) -> None:
         log(message, "The message is valid.")
     else:
         log(message, "The message is invalid.")
-        is_success = all(
-            (
-                await message.delete(),
-                await message.chat.ban(message.from_user.id)
-            )
-        )
 
-        if is_success:
-            log(message, "The user is successfully blocked.")
-        else:
-            log(message, "Failed to block the user.")
+        await ban_user(
+            message,
+            message.chat.id,
+            message.from_user.id,
+            message.message_id
+        )
 
 
 @dispatcher.edited_message()
@@ -263,13 +347,14 @@ async def edited_message_handler(message: Message) -> None:
 
 async def main() -> None:
     global ADMINS
+    global BOT
 
     # Create bot
-    bot = Bot(token=TOKEN)
+    BOT = Bot(token=TOKEN)
 
     # Get admins of all supported chats
     for chat_id in VALID_CHATS:
-        admins = await bot.get_chat_administrators(chat_id=chat_id)
+        admins = await BOT.get_chat_administrators(chat_id=chat_id)
         ADMINS.extend(
             [
                 {"name": admin.user.full_name, "id": admin.user.id}
@@ -283,7 +368,7 @@ async def main() -> None:
     log(None, f"Current admins: {_admins}")
 
     # Run events dispatching
-    await dispatcher.start_polling(bot)
+    await dispatcher.start_polling(BOT)
 
 
 if __name__ == "__main__":
