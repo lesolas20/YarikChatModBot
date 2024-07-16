@@ -233,6 +233,7 @@ def get_log_entries(
                 f"User name: {entry['user_name']}",
                 f"Chat ID: {entry['chat_id']}",
                 f"Chat title: {entry['chat_title']}",
+                f"Message ID: {entry['message_id']}",
                 f"Message text: {message_text}"
             )
         )
@@ -363,7 +364,7 @@ async def main() -> None:
         )
 
     _admins = ", ".join(
-        [f"{admin['name']} ({admin['id']})" for admin in ADMINS]
+        set([f"{admin['name']} ({admin['id']})" for admin in ADMINS])
     )
     log(None, f"Current admins: {_admins}")
 
