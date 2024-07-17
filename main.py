@@ -22,13 +22,13 @@ DATE_FORMAT: str = "%d.%m.%Y %H:%M:%S"
 
 TOKEN: str = ""
 
-BOT = None
+BOT: Bot = None
 
 LATIN_TO_CYRILLIC: dict[int: str, ...] = {}
 BANNED_PHRASES: list[str, ...] = []
 VALID_CHATS: list[int, ...] = []
 VALIDATORS: list[Callable[[Message], bool], ...] = []
-ADMINS: list[dict[str: str, str: int], ...] = []
+ADMINS: list[dict[str, int], ...] = []
 
 dispatcher = Dispatcher()
 
@@ -72,22 +72,22 @@ def validate_text(message: Message) -> bool:
     return True
 
 
-def parse_log_command(message: Message) -> dict[str: int] | None:
-    message_text = message.text
+def parse_log_command(message: Message) -> dict[str, int] | None:
+    text = message.text
 
     # Maximum allowed command length is 13:
     #     4 ("/log") + 8 (time value) + 1 (time unit)
     # Minimum allowed command length is 6:
     #     4 ("/log") + 1 (time value) + 1 (time unit)
-    if (len(message_text) > 13) or (len(message_text) < 6):
+    if (len(text) > 13) or (len(text) < 6):
         return None
 
     units_table = {"m": "minutes", "h": "hours" , "d": "days"}
 
-    unit = message_text[-1]
+    unit = text[-1]
 
     if unit in units_table.keys():
-        value = message_text[4:-1]
+        value = text[4:-1]
 
         try:
             value = int(value)
@@ -101,10 +101,8 @@ def parse_log_command(message: Message) -> dict[str: int] | None:
     return None
 
 
-def parse_ban_command(
-    message: Message
-) -> dict[str: int, str: int, str: int] | None:
-    message_text = message.text
+def parse_ban_command(message: Message) -> dict[str, int] | None:
+    text = message.text
 
     # Maximum allowed command length is 52:
     #     4 ("/ban") + 16 (chat ID) + 16 (user ID) + 16 (message ID)\
@@ -112,10 +110,10 @@ def parse_ban_command(
     # Minimum allowed command length is 16:
     #     4 ("/ban") + 4 (chat ID) + 4 (user ID) + 1 (message ID)\
     #     + 3 (whitespaces)
-    if (len(message_text) > 52) or (len(message_text) < 16):
+    if (len(text) > 52) or (len(text) < 16):
         return None
 
-    parts = message_text.split(" ")
+    parts = text.split(" ")
     if len(parts) == 4:
         _, chat_id, user_id, message_id = parts
 
@@ -130,6 +128,34 @@ def parse_ban_command(
             "chat_id": chat_id,
             "user_id": user_id,
             "message_id": message_id
+        }
+
+    return None
+
+
+def parse_unban_command(message: Message) -> dict[str, int] | None:
+    text = message.text
+
+    # Maximum allowed command length is 40:
+    #     6 ("/unban") + 16 (chat ID) + 16 (user ID) + 2 (whitespaces)
+    # Minimum allowed command length is 16:
+    #     6 ("/unban") + 4 (chat ID) + 4 (user ID) + 2 (whitespaces)
+    if (len(text) > 40) or (len(text) < 16):
+        return None
+
+    parts = text.split(" ")
+    if len(parts) == 3:
+        _, chat_id, user_id = parts
+
+        try:
+            chat_id = int(chat_id)
+            user_id = int(user_id)
+        except ValueError:
+            return None
+
+        return {
+            "chat_id": chat_id,
+            "user_id": user_id
         }
 
     return None
@@ -150,6 +176,21 @@ async def ban_user(
 
     else:
         log(message, "The user is successfully blocked.")
+
+
+async def unban_user(message: Message, chat_id: int, user_id: int) -> None:
+    try:
+        await BOT.unban_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
+            only_if_banned=True
+        )
+
+    except TelegramBadRequest:
+        log(message, "Failed to unblock the user.")
+
+    else:
+        log(message, "The user is successfully unblocked.")
 
 
 def format_log(
@@ -283,10 +324,10 @@ async def private_message_handler(message: Message) -> None:
     if (message.from_user.id in admin_ids) and message.text:
 
         if message.text.startswith("/log"):
-            command = parse_log_command(message)
-            if command is not None:
+            kwargs = parse_log_command(message)
+            if kwargs is not None:
                 now = datetime.now()
-                delta = timedelta(**command)
+                delta = timedelta(**kwargs)
                 start = now - delta
 
                 entries = get_log_entries(
@@ -298,22 +339,30 @@ async def private_message_handler(message: Message) -> None:
                 if entries:
                     for entry in entries:
                         await message.answer(entry)
-                    log(message, "Displayed the logs.")
+                    log(message, "Displayed the log entries.")
 
                 else:
                     await message.answer("No data available")
-                    log(message, "No logs data to display.")
+                    log(message, "No log entries to display.")
 
                 return
 
         elif message.text.startswith("/ban"):
-            command = parse_ban_command(message)
-            if command is not None:
-                await ban_user(message, **command)
-
+            kwargs = parse_ban_command(message)
+            if kwargs is not None:
+                await ban_user(message, **kwargs)
                 return
 
-    await message.answer("Invalid command")
+        elif message.text.startswith("/unban"):
+            kwargs = parse_unban_command(message)
+            if kwargs is not None:
+                await unban_user(message, **kwargs)
+                return
+
+        await message.answer("Invalid command")
+
+    else:
+        await message.answer("You are not allowed to use this command")
 
 
 @dispatcher.message()
