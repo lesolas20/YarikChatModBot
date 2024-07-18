@@ -24,7 +24,7 @@ TOKEN: str = ""
 
 BOT: Bot = None
 
-LATIN_TO_CYRILLIC: dict[int: str, ...] = {}
+LATIN_TO_CYRILLIC: dict[int, str] = {}
 BANNED_PHRASES: list[str, ...] = []
 VALID_CHATS: list[int, ...] = []
 VALIDATORS: list[Callable[[Message], bool], ...] = []
@@ -442,7 +442,7 @@ if __name__ == "__main__":
 
     with open("latin2cyrillic.json", "r") as file:
         file_text = file.read()
-    LATIN_TO_CYRILLIC: dict[int: str, ...] = str.maketrans(
+    LATIN_TO_CYRILLIC: dict[int, str] = str.maketrans(
         json.loads(file_text)
     )
 
