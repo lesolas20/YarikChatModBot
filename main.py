@@ -27,7 +27,6 @@ BOT: Bot = None
 LATIN_TO_CYRILLIC: dict[int, str] = {}
 BANNED_PHRASES: list[str, ...] = []
 VALID_CHATS: list[int, ...] = []
-VALIDATORS: list[Callable[[Message], bool], ...] = []
 ADMINS: list[dict[str, int], ...] = []
 
 dispatcher = Dispatcher()
@@ -57,17 +56,25 @@ def is_trusted(message: Message) -> bool:
     )
 
 
-def is_valid(message: Message) -> bool:
-    return all([validator(message) for validator in VALIDATORS])
+async def is_valid(message: Message) -> bool:
+    chat_full_info = await BOT.get_chat(chat_id=message.from_user.id)
+    return all(
+        (
+            validate_text(chat_full_info.bio),
+            validate_text(message.text)
+        )
+    )
 
 
-def validate_text(message: Message) -> bool:
-    if message.text is not None:
-        text = normalize(message.text)
+def validate_text(text: str | None) -> bool:
+    if text is None:
+        return True
 
-        for phrase in BANNED_PHRASES:
-            if phrase in text:
-                return False
+    text = normalize(text)
+
+    for phrase in BANNED_PHRASES:
+        if phrase in text:
+            return False
 
     return True
 
@@ -377,7 +384,7 @@ async def message_handler(message: Message) -> None:
         log(message, "The user is trusted.")
         return
 
-    elif is_valid(message):
+    elif await is_valid(message):
         log(message, "The message is valid.")
     else:
         log(message, "The message is invalid.")
@@ -456,10 +463,6 @@ if __name__ == "__main__":
     with open("valid_chats.json", "r") as file:
         file_text = file.read()
     VALID_CHATS: list[int, ...] = json.loads(file_text)
-
-    VALIDATORS: list[Callable[[Message], bool], ...] = [
-        validate_text,
-    ]
 
     # Run bot
     asyncio.run(main())
