@@ -57,7 +57,7 @@ def is_trusted(message: Message) -> bool:
 
 
 async def is_valid(message: Message) -> bool:
-    user_bio = await BOT.get_chat(chat_id=message.from_user.id).bio
+    user_bio = (await BOT.get_chat(chat_id=message.from_user.id)).bio
     return validate_text(user_bio) and validate_text(message.text)
 
 
