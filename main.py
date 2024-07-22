@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from functools import cache
+
 from collections.abc import Callable
 
 import json
@@ -11,7 +13,12 @@ import logging
 import asyncio
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram.filters import CommandStart
+from aiogram.filters.callback_data import CallbackData
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+)
 from aiogram.exceptions import TelegramBadRequest
 
 from unidecode import unidecode
@@ -29,7 +36,104 @@ BANNED_PHRASES: list[str, ...] = []
 VALID_CHATS: list[int, ...] = []
 ADMINS: list[dict[str, int], ...] = []
 
+LOGS_MENU = (
+    ("Last 15 minutes", 15, "minutes"),
+    ("Last hour", 1, "hours"),
+    ("Last 4 hours", 4, "hours"),
+    ("Last 24 hours", 1, "days"),
+    ("Last week", 7, "days"),
+    ("Last month", 30, "days"),
+)
+
 dispatcher = Dispatcher()
+
+
+class Text:
+    ban = "Ban"
+    unban = "Unban"
+    select_logs = "Select the time frame to view the logs:"
+    no_data = "No data available"
+    invalid_command = "Invalid command"
+    forbidden_command = "You are not allowed to use this command"
+    f_ban_fail = "Failed to block user {} in chat {}"
+    f_ban_success = "\n".join(
+        (
+            "Successfully blocked the user.",
+            "User ID: {}",
+            "Chat ID: {}",
+            "Message ID: {}"
+        )
+    )
+    f_unban_fail = "Failed to unblock user {} in chat {}"
+    f_unban_success = "\n".join(
+        (
+            "Successfully unblocked the user.",
+            "User ID: {}",
+            "Chat ID: {}",
+            "Message ID: {}"
+        )
+    )
+    log_recieved_private = "The private message is recieved."
+    log_displayed_logs = "Displayed the log entries."
+    log_no_logs_data = "No log entries to display."
+    log_recieved_public = "The message is recieved."
+    log_unsupported_chat = "The chat is not supported."
+    log_trusted_user = "The user is trusted."
+    log_message_valid = "The message is valid."
+    log_message_invalid = "The message is invalid."
+    log_f_ban_fail = "Failed to block user {} in chat {}"
+    log_f_ban_success = "Successfully blocked user {} in chat {}"
+    log_f_unban_fail = "Failed to unblock user {} in chat {}"
+    log_f_unban_success = "Successfully unblocked user {} in chat {}"
+
+
+class LogsMenuCallback(CallbackData, prefix="log", sep=" "):
+    time_value: int
+    time_unit: str
+
+
+class BanUserCallback(CallbackData, prefix="ban", sep=" "):
+    pass
+
+
+class UnbanUserCallback(CallbackData, prefix="unban", sep=" "):
+    pass
+
+
+@cache
+def get_logs_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=text,
+                    callback_data=LogsMenuCallback(
+                        time_value=time_value,
+                        time_unit=time_unit
+                    ).pack()
+                )
+            ]
+            for text, time_value, time_unit in LOGS_MENU
+        ]
+    )
+
+
+@cache
+def get_ban_user_keyboard() -> InlineKeyboardMarkup:
+    button = InlineKeyboardButton(
+        text=Text.ban,
+        callback_data=BanUserCallback().pack()
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[[button]])
+
+
+@cache
+def get_unban_user_keyboard() -> InlineKeyboardMarkup:
+    button = InlineKeyboardButton(
+        text=Text.unban,
+        callback_data=UnbanUserCallback().pack()
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[[button]])
 
 
 def normalize(text: str) -> str:
@@ -72,127 +176,6 @@ def validate_text(text: str | None) -> bool:
             return False
 
     return True
-
-
-def parse_log_command(message: Message) -> dict[str, int] | None:
-    text = message.text
-
-    # Maximum allowed command length is 13:
-    #     4 ("/log") + 8 (time value) + 1 (time unit)
-    # Minimum allowed command length is 6:
-    #     4 ("/log") + 1 (time value) + 1 (time unit)
-    if (len(text) > 13) or (len(text) < 6):
-        return None
-
-    units_table = {"m": "minutes", "h": "hours" , "d": "days"}
-
-    unit = text[-1]
-
-    if unit in units_table.keys():
-        value = text[4:-1]
-
-        try:
-            value = int(value)
-        except ValueError:
-            return None
-
-        if value > 0:
-            unit = units_table[unit]
-            return {unit: value}
-
-    return None
-
-
-def parse_ban_command(message: Message) -> dict[str, int] | None:
-    text = message.text
-
-    # Maximum allowed command length is 52:
-    #     4 ("/ban") + 16 (chat ID) + 16 (user ID) + 16 (message ID)\
-    #     + 3 (whitespaces)
-    # Minimum allowed command length is 16:
-    #     4 ("/ban") + 4 (chat ID) + 4 (user ID) + 1 (message ID)\
-    #     + 3 (whitespaces)
-    if (len(text) > 52) or (len(text) < 16):
-        return None
-
-    parts = text.split(" ")
-    if len(parts) == 4:
-        _, chat_id, user_id, message_id = parts
-
-        try:
-            chat_id = int(chat_id)
-            user_id = int(user_id)
-            message_id = int(message_id)
-        except ValueError:
-            return None
-
-        return {
-            "chat_id": chat_id,
-            "user_id": user_id,
-            "message_id": message_id
-        }
-
-    return None
-
-
-def parse_unban_command(message: Message) -> dict[str, int] | None:
-    text = message.text
-
-    # Maximum allowed command length is 40:
-    #     6 ("/unban") + 16 (chat ID) + 16 (user ID) + 2 (whitespaces)
-    # Minimum allowed command length is 16:
-    #     6 ("/unban") + 4 (chat ID) + 4 (user ID) + 2 (whitespaces)
-    if (len(text) > 40) or (len(text) < 16):
-        return None
-
-    parts = text.split(" ")
-    if len(parts) == 3:
-        _, chat_id, user_id = parts
-
-        try:
-            chat_id = int(chat_id)
-            user_id = int(user_id)
-        except ValueError:
-            return None
-
-        return {
-            "chat_id": chat_id,
-            "user_id": user_id
-        }
-
-    return None
-
-
-async def ban_user(
-    message: Message,
-    chat_id: int,
-    user_id: int,
-    message_id: int
-) -> None:
-    try:
-        await BOT.delete_message(chat_id=chat_id, message_id=message_id)
-        await BOT.ban_chat_member(chat_id=chat_id, user_id=user_id)
-
-    except TelegramBadRequest:
-        log(message, "Failed to block the user.")
-
-    else:
-        log(message, "The user is successfully blocked.")
-
-
-async def unban_user(message: Message, chat_id: int, user_id: int) -> None:
-    try:
-        await BOT.unban_chat_member(
-            chat_id=chat_id,
-            user_id=user_id,
-            only_if_banned=True
-        )
-
-    except TelegramBadRequest:
-        log(message, "Failed to unblock the user.")
-
-    else:
-        log(message, "The user is successfully unblocked.")
 
 
 def format_log(
@@ -318,83 +301,171 @@ def get_log_entries(
     return entries[::-1]
 
 
-@dispatcher.message(F.chat.type == "private")
-async def private_message_handler(message: Message) -> None:
-    log(message, "The private message is recieved.")
+def extract_field(text: str, target: str) -> int | None:
+    rows = text.split("\n")
 
-    admin_ids = [admin["id"] for admin in ADMINS]
-    if (message.from_user.id in admin_ids) and message.text:
+    for row in rows:
+        index = row.find(target)
+        if index != -1:
+            field = row[index+len(target):]
+            break
+    else:
+        return None
 
-        if message.text.startswith("/log"):
-            kwargs = parse_log_command(message)
-            if kwargs is not None:
-                now = datetime.now()
-                delta = timedelta(**kwargs)
-                start = now - delta
+    if field == "None":
+        return None
 
-                entries = get_log_entries(
-                    filename=LOG_PATH,
-                    start=start,
-                    end=now
-                )
+    return int(field)
 
-                if entries:
-                    for entry in entries:
-                        await message.answer(entry)
-                    log(message, "Displayed the log entries.")
 
-                else:
-                    await message.answer("No data available")
-                    log(message, "No log entries to display.")
+@dispatcher.message(CommandStart())
+async def start_message_handler(message: Message):
+    log(message, Text.log_recieved_private)
 
-                return
-
-        elif message.text.startswith("/ban"):
-            kwargs = parse_ban_command(message)
-            if kwargs is not None:
-                await ban_user(message, **kwargs)
-                return
-
-        elif message.text.startswith("/unban"):
-            kwargs = parse_unban_command(message)
-            if kwargs is not None:
-                await unban_user(message, **kwargs)
-                return
-
-        await message.answer("Invalid command")
+    if is_trusted:
+        menu = await message.answer(
+            Text.select_logs,
+            reply_markup=get_logs_menu_keyboard()
+        )
+        await menu.pin()
 
     else:
-        await message.answer("You are not allowed to use this command")
+        await message.answer(Text.forbidden_command)
 
 
 @dispatcher.message()
 async def message_handler(message: Message) -> None:
-    log(message, "The message is recieved.")
+    log(message, Text.log_recieved_public)
 
     if not is_in_valid_chat(message):
-        log(message, "The chat is not supported.")
+        log(message, Text.log_unsupported_chat)
         return
 
     elif is_trusted(message):
-        log(message, "The user is trusted.")
+        log(message, Text.log_trusted_user)
         return
 
     elif await is_valid(message):
-        log(message, "The message is valid.")
+        log(message, Text.log_message_valid)
     else:
-        log(message, "The message is invalid.")
+        log(message, Text.log_message_invalid)
 
-        await ban_user(
-            message,
-            message.chat.id,
-            message.from_user.id,
-            message.message_id
-        )
+        message_id = message.message_id
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+
+        try:
+            await BOT.delete_message(
+                chat_id=chat_id,
+                message_id=message_id
+            )
+            await BOT.ban_chat_member(
+                chat_id=chat_id,
+                user_id=user_id
+            )
+
+        except TelegramBadRequest:
+            log(message, Text.log_f_ban_fail.format(user_id, chat_id))
+
+        else:
+            log(message, Text.log_f_ban_success.format(user_id, chat_id))
 
 
 @dispatcher.edited_message()
 async def edited_message_handler(message: Message) -> None:
     await message_handler(message)
+
+
+@dispatcher.callback_query(LogsMenuCallback.filter())
+async def logs_menu_callback_query_handler(
+    callback_query: CallbackQuery,
+    callback_data: LogsMenuCallback
+):
+    unit = callback_data.time_unit
+    value = callback_data.time_value
+
+    now = datetime.now()
+    delta = timedelta(**{unit: value})
+    start = now - delta
+
+    entries = get_log_entries(filename=LOG_PATH, start=start, end=now)
+
+    if entries:
+        for entry in entries:
+            await callback_query.message.answer(
+                entry,
+                reply_markup=get_ban_user_keyboard()
+            )
+
+    else:
+        await callback_query.message.answer(Text.no_data)
+
+    await callback_query.answer()
+
+
+@dispatcher.callback_query(BanUserCallback.filter())
+async def ban_user_callback_query_handler(
+    callback_query: CallbackQuery,
+    callback_data: BanUserCallback
+):
+    message = callback_query.message
+
+    message_id = extract_field(message.text, "Message ID: ")
+    chat_id = extract_field(message.text, "Chat ID: ")
+    user_id = extract_field(message.text, "User ID: ")
+
+    if all((message_id, chat_id, user_id)):
+        try:
+            await BOT.delete_message(chat_id=chat_id, message_id=message_id)
+            await BOT.ban_chat_member(chat_id=chat_id, user_id=user_id)
+
+        except TelegramBadRequest:
+            await message.answer(Text.f_ban_fail.format(user_id, chat_id))
+            log(message, Text.log_f_ban_fail.format(user_id, chat_id))
+
+        else:
+            await message.answer(
+                Text.f_ban_success.format(user_id, chat_id),
+                reply_markup=get_unban_user_keyboard()
+            )
+            log(message, Text.log_f_ban_success.format(user_id, chat_id))
+
+    else:
+        await message.answer(Text.f_ban_fail.format(user_id, chat_id))
+        log(message, Text.log_f_ban_fail.format(user_id, chat_id))
+
+    await callback_query.answer()
+
+
+@dispatcher.callback_query(UnbanUserCallback.filter())
+async def unban_user_callback_query_handler(
+    callback_query: CallbackQuery,
+    callback_data: UnbanUserCallback
+):
+    message = callback_query.message
+
+    chat_id = extract_field(message.text, "Chat ID: ")
+    user_id = extract_field(message.text, "User ID: ")
+
+    try:
+        await BOT.unban_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
+            only_if_banned=True
+        )
+
+    except TelegramBadRequest:
+        await message.answer(Text.f_unban_fail.format(user_id))
+        log(message, Text.log_f_unban_fail.format(user_id))
+
+    else:
+        await message.answer(
+            Text.f_unban_success.format(user_id),
+            reply_markup=get_ban_user_keyboard()
+        )
+        log(message, Text.log_f_unban_success.format(user_id))
+
+    await callback_query.answer()
 
 
 async def main() -> None:
