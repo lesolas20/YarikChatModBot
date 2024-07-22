@@ -333,6 +333,11 @@ async def start_message_handler(message: Message):
         await message.answer(Text.forbidden_command)
 
 
+@dispatcher.message(F.chat.type == "private")
+async def private_message_handler(message: Message) -> None:
+    log(message, Text.log_recieved_private)
+
+
 @dispatcher.message()
 async def message_handler(message: Message) -> None:
     log(message, Text.log_recieved_public)
