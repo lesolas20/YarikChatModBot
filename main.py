@@ -55,7 +55,7 @@ class Text:
     no_data = "No data available"
     invalid_command = "Invalid command"
     forbidden_command = "You are not allowed to use this command"
-    f_ban_fail = "Failed to block user {} in chat {}"
+    f_ban_fail = "Failed to block user {} in chat {} from message {}"
     f_ban_success = "\n".join(
         (
             "Successfully blocked the user.",
@@ -64,7 +64,7 @@ class Text:
             "Message ID: {}"
         )
     )
-    f_unban_fail = "Failed to unblock user {} in chat {}"
+    f_unban_fail = "Failed to unblock user {} in chat {} from message {}"
     f_unban_success = "\n".join(
         (
             "Successfully unblocked the user.",
@@ -81,8 +81,8 @@ class Text:
     log_trusted_user = "The user is trusted."
     log_message_valid = "The message is valid."
     log_message_invalid = "The message is invalid."
-    log_f_ban_fail = "Failed to block user {} in chat {}"
-    log_f_ban_success = "Successfully blocked user {} in chat {}"
+    log_f_ban_fail = "Failed to block user {} in chat {} from message {}"
+    log_f_ban_success = "Successfully blocked user {} in chat {} from message {}"
     log_f_unban_fail = "Failed to unblock user {} in chat {}"
     log_f_unban_success = "Successfully unblocked user {} in chat {}"
 
@@ -370,10 +370,16 @@ async def message_handler(message: Message) -> None:
             )
 
         except TelegramBadRequest:
-            log(message, Text.log_f_ban_fail.format(user_id, chat_id))
+            log(
+                message,
+                Text.log_f_ban_fail.format(user_id, chat_id, message_id)
+            )
 
         else:
-            log(message, Text.log_f_ban_success.format(user_id, chat_id))
+            log(
+                message,
+                Text.log_f_ban_success.format(user_id, chat_id, message_id)
+            )
 
 
 @dispatcher.edited_message()
@@ -425,19 +431,29 @@ async def ban_user_callback_query_handler(
             await BOT.ban_chat_member(chat_id=chat_id, user_id=user_id)
 
         except TelegramBadRequest:
-            await message.answer(Text.f_ban_fail.format(user_id, chat_id))
-            log(message, Text.log_f_ban_fail.format(user_id, chat_id))
+            await message.answer(
+                Text.f_ban_fail.format(user_id, chat_id, message_id)
+            )
+            log(
+                message,
+                Text.log_f_ban_fail.format(user_id, chat_id, message_id)
+            )
 
         else:
             await message.answer(
-                Text.f_ban_success.format(user_id, chat_id),
+                Text.f_ban_success.format(user_id, chat_id, message_id),
                 reply_markup=get_unban_user_keyboard()
             )
-            log(message, Text.log_f_ban_success.format(user_id, chat_id))
+            log(
+                message,
+                Text.log_f_ban_success.format(user_id, chat_id, message_id)
+            )
 
     else:
-        await message.answer(Text.f_ban_fail.format(user_id, chat_id))
-        log(message, Text.log_f_ban_fail.format(user_id, chat_id))
+        await message.answer(
+            Text.f_ban_fail.format(user_id, chat_id, message_id)
+        )
+        log(message, Text.log_f_ban_fail.format(user_id, chat_id, message_id))
 
     await callback_query.answer()
 
