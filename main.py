@@ -27,6 +27,8 @@ from unidecode import unidecode
 LOG_PATH: str = "log.jsonl"
 DATE_FORMAT: str = "%d.%m.%Y %H:%M:%S"
 
+TIMEZONE = "Europe/Kyiv"
+
 TOKEN: str = ""
 
 BOT: Bot = None
@@ -179,14 +181,15 @@ def validate_text(text: str | None) -> bool:
 
 
 def format_log(
-    chat_id: int | None,
-    chat_title: str | None,
-    user_id: int | None,
-    user_name: str | None,
-    message_id: int | None,
-    message_date: str | None,
-    message_text: str | None,
-    comment: str | None
+    chat_id: int | None = None,
+    chat_title: str | None = None,
+    user_id: int | None = None,
+    user_name: str | None = None,
+    user_bio: str | None = None,
+    message_id: int | None = None,
+    message_date: str | None = None,
+    message_text: str | None = None,
+    comment: str | None = None
 ) -> str:
     return json.dumps(
         {
@@ -194,6 +197,7 @@ def format_log(
             "comment": comment,
             "user_id": user_id,
             "user_name": user_name,
+            "user_bio": user_bio,
             "message_id": message_id,
             "chat_id": chat_id,
             "chat_title": chat_title,
@@ -203,33 +207,28 @@ def format_log(
     )
 
 
-def log(message: Message | None, comment: str) -> None:
+async def log(message: Message | None, comment: str) -> None:
     if message is None:
         text = format_log(
-            None,
-            None,
-            None,
-            None,
-            None,
-            datetime.now().astimezone(
-                ZoneInfo("Europe/Kyiv")
+            message_date=datetime.now().astimezone(
+                ZoneInfo(TIMEZONE)
             ).strftime(DATE_FORMAT),
-            None,
-            comment
+            comment=comment
         )
 
     else:
         text = format_log(
-            message.chat.id,
-            str(message.chat.title),
-            message.from_user.id,
-            str(message.from_user.full_name),
-            message.message_id,
-            message.date.astimezone(
-                ZoneInfo("Europe/Kyiv")
+            chat_id=message.chat.id,
+            chat_title=str(message.chat.title),
+            user_id=message.from_user.id,
+            user_name=str(message.from_user.full_name),
+            user_bio=(await BOT.get_chat(chat_id=message.from_user.id)).bio,
+            message_id=message.message_id,
+            message_date=message.date.astimezone(
+                ZoneInfo(TIMEZONE)
             ).strftime(DATE_FORMAT),
-            str(message.text),
-            comment
+            message_text=str(message.text),
+            comment=comment
         )
 
     logger.info(text)
@@ -257,6 +256,7 @@ def get_log_entries(
                 f"Comment: {entry['comment']}",
                 f"User ID: {entry['user_id']}",
                 f"User name: {entry['user_name']}",
+                f"User bio: {entry['user_bio']}",
                 f"Chat ID: {entry['chat_id']}",
                 f"Chat title: {entry['chat_title']}",
                 f"Message ID: {entry['message_id']}",
@@ -320,7 +320,7 @@ def extract_field(text: str, target: str) -> int | None:
 
 @dispatcher.message(CommandStart())
 async def start_message_handler(message: Message):
-    log(message, Text.log_recieved_private)
+    await log(message, Text.log_recieved_private)
 
     if is_trusted:
         menu = await message.answer(
@@ -335,25 +335,25 @@ async def start_message_handler(message: Message):
 
 @dispatcher.message(F.chat.type == "private")
 async def private_message_handler(message: Message) -> None:
-    log(message, Text.log_recieved_private)
+    await log(message, Text.log_recieved_private)
 
 
 @dispatcher.message()
 async def message_handler(message: Message) -> None:
-    log(message, Text.log_recieved_public)
+    await log(message, Text.log_recieved_public)
 
     if not is_in_valid_chat(message):
-        log(message, Text.log_unsupported_chat)
+        await log(message, Text.log_unsupported_chat)
         return
 
     elif is_trusted(message):
-        log(message, Text.log_trusted_user)
+        await log(message, Text.log_trusted_user)
         return
 
     elif await is_valid(message):
-        log(message, Text.log_message_valid)
+        await log(message, Text.log_message_valid)
     else:
-        log(message, Text.log_message_invalid)
+        await log(message, Text.log_message_invalid)
 
         message_id = message.message_id
         chat_id = message.chat.id
@@ -370,13 +370,13 @@ async def message_handler(message: Message) -> None:
             )
 
         except TelegramBadRequest:
-            log(
+            await log(
                 message,
                 Text.log_f_ban_fail.format(user_id, chat_id, message_id)
             )
 
         else:
-            log(
+            await log(
                 message,
                 Text.log_f_ban_success.format(user_id, chat_id, message_id)
             )
@@ -434,7 +434,7 @@ async def ban_user_callback_query_handler(
             await message.answer(
                 Text.f_ban_fail.format(user_id, chat_id, message_id)
             )
-            log(
+            await log(
                 message,
                 Text.log_f_ban_fail.format(user_id, chat_id, message_id)
             )
@@ -444,7 +444,7 @@ async def ban_user_callback_query_handler(
                 Text.f_ban_success.format(user_id, chat_id, message_id),
                 reply_markup=get_unban_user_keyboard()
             )
-            log(
+            await log(
                 message,
                 Text.log_f_ban_success.format(user_id, chat_id, message_id)
             )
@@ -453,7 +453,7 @@ async def ban_user_callback_query_handler(
         await message.answer(
             Text.f_ban_fail.format(user_id, chat_id, message_id)
         )
-        log(message, Text.log_f_ban_fail.format(user_id, chat_id, message_id))
+        await log(message, Text.log_f_ban_fail.format(user_id, chat_id, message_id))
 
     await callback_query.answer()
 
@@ -477,14 +477,14 @@ async def unban_user_callback_query_handler(
 
     except TelegramBadRequest:
         await message.answer(Text.f_unban_fail.format(user_id))
-        log(message, Text.log_f_unban_fail.format(user_id))
+        await log(message, Text.log_f_unban_fail.format(user_id))
 
     else:
         await message.answer(
             Text.f_unban_success.format(user_id),
             reply_markup=get_ban_user_keyboard()
         )
-        log(message, Text.log_f_unban_success.format(user_id))
+        await log(message, Text.log_f_unban_success.format(user_id))
 
     await callback_query.answer()
 
@@ -509,7 +509,7 @@ async def main() -> None:
     _admins = ", ".join(
         set([f"{admin['name']} ({admin['id']})" for admin in ADMINS])
     )
-    log(None, f"Current admins: {_admins}")
+    await log(None, f"Current admins: {_admins}")
 
     # Run events dispatching
     await dispatcher.start_polling(BOT)
