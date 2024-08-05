@@ -17,6 +17,7 @@ from aiogram.filters import CommandStart
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import (
     Message, CallbackQuery,
+    LinkPreviewOptions,
     InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 )
 from aiogram.exceptions import TelegramBadRequest
@@ -405,6 +406,7 @@ async def logs_menu_callback_query_handler(
         for entry in entries:
             await callback_query.message.answer(
                 entry,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
                 reply_markup=get_ban_user_keyboard()
             )
 
