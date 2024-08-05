@@ -220,15 +220,15 @@ async def log(message: Message | None, comment: str) -> None:
     else:
         text = format_log(
             chat_id=message.chat.id,
-            chat_title=str(message.chat.title),
+            chat_title=message.chat.title,
             user_id=message.from_user.id,
-            user_name=str(message.from_user.full_name),
+            user_name=message.from_user.full_name,
             user_bio=(await BOT.get_chat(chat_id=message.from_user.id)).bio,
             message_id=message.message_id,
             message_date=message.date.astimezone(
                 ZoneInfo(TIMEZONE)
             ).strftime(DATE_FORMAT),
-            message_text=str(message.text),
+            message_text=message.text,
             comment=comment
         )
 
