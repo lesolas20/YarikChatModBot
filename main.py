@@ -326,8 +326,6 @@ async def logs_menu_callback_query_handler(
         for entry in entries:
             ids = unformat(entry[22:], Text.recieved_public)
 
-            logger.debug(ids)
-
             if ids:
                 user_id = int(ids[1])
                 chat_id = int(ids[2])
