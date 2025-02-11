@@ -14,8 +14,12 @@ import logging
 import asyncio
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, IS_MEMBER, IS_NOT_MEMBER
 from aiogram.filters.callback_data import CallbackData
+from aiogram.filters.chat_member_updated import (
+    ChatMemberUpdated,
+    ChatMemberUpdatedFilter
+)
 from aiogram.types import (
     Message, CallbackQuery,
     LinkPreviewOptions,
@@ -60,6 +64,7 @@ class Text:
 
     recieved_private = "The private message {} from user {} in chat {} is recieved. Message details: "
     recieved_public = "The message {} from user {} in chat {} is recieved. Message details: "
+    recieved_join = "The user {} joined chat {}."
 
     unsupported_chat = "Chat {} is not supported. Message {} from user {} ignored."
     trusted_user = "The user {} in chat {} is trusted. Message {} ignored."
@@ -262,6 +267,17 @@ async def private_message_handler(message: Message) -> None:
     message_id = message.message_id
 
     log_text = Text.recieved_private.format(message_id, user_id, chat_id)
+    log_text += await format_message_data(message)
+
+    logger.info(log_text)
+
+
+@dispatcher.chat_member(ChatMemberUpdatedFilter(IS_NOT_MEMBER >> IS_MEMBER))
+async def user_join_handler(event: ChatMemberUpdated) -> None:
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    log_text = Text.recieved_join.format(user_id, chat_id)
     log_text += await format_message_data(message)
 
     logger.info(log_text)
