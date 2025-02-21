@@ -2,6 +2,16 @@
 
 session_name="YCMB"
 
+if [ -d "venv" ]; then
+  echo "virtual environment found"
+else
+  echo "virtual environment not found, creating"
+  python3 -m venv venv --prompt $session_name
+  source venv/bin/activate
+  pip install -r requirements.txt
+  deactivate
+fi
+
 tmux has-session -t $session_name 2>/dev/null
 if [ $? -eq 0 ]; then
   echo "tmux session found, recreating"
