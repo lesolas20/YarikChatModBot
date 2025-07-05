@@ -7,8 +7,6 @@ from zoneinfo import ZoneInfo
 
 from functools import cache
 
-from collections.abc import Callable
-
 import json
 import logging
 import asyncio
@@ -23,7 +21,7 @@ from aiogram.filters.chat_member_updated import (
 from aiogram.types import (
     Message, CallbackQuery,
     LinkPreviewOptions,
-    InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+    InlineKeyboardMarkup, InlineKeyboardButton
 )
 from aiogram.exceptions import TelegramBadRequest
 
@@ -249,7 +247,7 @@ async def start_message_handler(message: Message) -> None:
     log_text = Text.recieved_private.format(message_id, user_id, chat_id)
     log_text += await format_message_data(message)
 
-    if is_trusted:
+    if is_trusted(message):
         menu = await message.answer(
             Text.select_logs,
             reply_markup=get_logs_menu_keyboard()
@@ -274,13 +272,10 @@ async def private_message_handler(message: Message) -> None:
 
 @dispatcher.chat_member(ChatMemberUpdatedFilter(IS_NOT_MEMBER >> IS_MEMBER))
 async def user_join_handler(event: ChatMemberUpdated) -> None:
-    user_id = message.from_user.id
-    chat_id = message.chat.id
+    user_id = event.from_user.id
+    chat_id = event.chat.id
 
-    log_text = Text.recieved_join.format(user_id, chat_id)
-    log_text += await format_message_data(message)
-
-    logger.info(log_text)
+    logger.info(Text.recieved_join.format(user_id, chat_id))
 
 
 @dispatcher.message()
@@ -490,4 +485,3 @@ if __name__ == "__main__":
 
     # Run bot
     asyncio.run(main())
-
