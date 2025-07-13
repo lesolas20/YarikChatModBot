@@ -1,6 +1,7 @@
 #!/bin/bash
 
 session_name="YCMB"
+db_name="db.sqlite"
 
 if [ -d "venv" ]; then
   echo "virtual environment found"
@@ -19,6 +20,14 @@ if [ $? -eq 0 ]; then
 else
   echo "tmux session not found, creating"
 fi
+
+sqlite3 "$db_name" <<EOF
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    first_seen DATETIME NOT NULL,
+    violations INTEGER NOT NULL
+);
+EOF
 
 tmux new -d -s $session_name -n main "deploy/run_main"
 

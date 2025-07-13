@@ -1,6 +1,8 @@
 from os import getenv
 from dotenv import load_dotenv
 import re
+import sqlite3
+import atexit
 
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -187,6 +189,20 @@ def validate_text(text: str | None) -> bool:
     return True
 
 
+def adapt_datetime_iso(value: datetime) -> str:
+    """Adapt datetime.datetime to timezone-naive ISO 8601 date."""
+    return value.replace(tzinfo=ZoneInfo(TIMEZONE)).isoformat(
+        sep=" ", timespec="seconds"
+    )
+
+
+def convert_datetime(value: bytes) -> datetime:
+    """Convert ISO 8601 datetime to datetime.datetime object."""
+    return datetime.fromisoformat(value.decode()).replace(
+        tzinfo=ZoneInfo(TIMEZONE)
+    )
+
+
 async def format_message_data(message: Message) -> str:
     chat_id = message.chat.id
     chat_title = message.chat.title
@@ -299,16 +315,66 @@ async def message_handler(message: Message) -> None:
 
     if not is_in_valid_chat(message):
         logger.info(Text.unsupported_chat.format(chat_id, message_id, user_id))
+        return
 
-    elif is_trusted(message):
+    if is_trusted(message):
         logger.info(Text.trusted_user.format(user_id, chat_id, message_id))
+        return
 
-    elif await is_valid(message):
+    if (await is_valid(message)):
         logger.info(Text.message_valid.format(message_id, user_id, chat_id))
 
-    else:
-        logger.info(Text.message_invalid.format(message_id, user_id, chat_id))
+        result = db_cursor.execute(
+            "SELECT * FROM users WHERE id = ?",
+            (user_id,)
+        ).fetchone()
 
+        if result is None:
+            first_seen = datetime.now(tz=ZoneInfo(TIMEZONE))
+            violations = 0
+
+            db_cursor.execute(
+                """INSERT INTO users (id, first_seen, violations)
+                VALUES (?, ?, ?)""",
+                (user_id, first_seen, violations)
+            )
+            db_connection.commit()
+
+        return
+
+    # If the messages is invalid:
+    logger.info(Text.message_invalid.format(message_id, user_id, chat_id))
+
+    result = db_cursor.execute(
+        "SELECT first_seen, violations FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+
+    if result is None:
+        first_seen = datetime.now(tz=ZoneInfo(TIMEZONE))
+        member_time = timedelta(0)
+        violations = 1
+    else:
+        first_seen, violations = result
+        member_time = datetime.now(tz=ZoneInfo(TIMEZONE)) - first_seen
+        violations += 1
+
+    result = db_cursor.execute(
+        """INSERT INTO users (id, first_seen, violations)
+        VALUES (?, ?, ?)
+        ON CONFLICT (id)
+        DO UPDATE SET violations = ?""",
+        (user_id, first_seen, violations, violations)
+    )
+    db_connection.commit()
+
+    if any(
+        (
+            (member_time < timedelta(days=2)) and (violations >= 1),
+            (member_time < timedelta(days=14)) and (violations >= 4),
+            (violations >= 8),
+        )
+    ):
+        # Ban the user
         try:
             await BOT.delete_message(chat_id=chat_id, message_id=message_id)
             await BOT.ban_chat_member(chat_id=chat_id, user_id=user_id)
@@ -454,6 +520,12 @@ async def main() -> None:
     await dispatcher.start_polling(BOT)
 
 
+@atexit.register
+def cleanup() -> None:
+    db_cursor.close()
+    db_connection.close()
+
+
 if __name__ == "__main__":
     # Setup logging
     logger = logging.getLogger(__name__)
@@ -490,6 +562,16 @@ if __name__ == "__main__":
     with open("valid_chats.json", "r") as file:
         file_text = file.read()
     VALID_CHATS: list[int, ...] = json.loads(file_text)
+
+    # Setup database
+    db_connection = sqlite3.connect(
+        "db.sqlite",
+        detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+    )
+    db_cursor = db_connection.cursor()
+
+    sqlite3.register_adapter(datetime, adapt_datetime_iso)
+    sqlite3.register_converter("datetime", convert_datetime)
 
     # Run bot
     asyncio.run(main())
