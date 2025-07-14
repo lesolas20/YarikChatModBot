@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import re
 import sqlite3
 import atexit
+import Levenshtein
 
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -180,13 +181,21 @@ def validate_text(text: str | None) -> bool:
     if text is None:
         return True
 
+    if len(text) < 20:
+        return True
+
     text = normalize_text(text)
+
+    ratios = [0]
 
     for phrase in BANNED_PHRASES:
         if phrase in text:
             return False
 
-    return True
+        ratio = Levenshtein.ratio(phrase, text)
+        ratios.append(ratio)
+
+    return max(ratios) < 0.65
 
 
 def adapt_datetime_iso(value: datetime) -> str:
