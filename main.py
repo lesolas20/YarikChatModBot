@@ -34,7 +34,7 @@ from unidecode import unidecode
 LOG_PATH: str = "logfile.log"
 DATE_FORMAT: str = "%d.%m.%Y %H:%M:%S"
 
-TIMEZONE = "Europe/Kyiv"
+TIMEZONE = ZoneInfo("Europe/Kyiv")
 
 TOKEN: str = ""
 
@@ -200,16 +200,14 @@ def validate_text(text: str | None) -> bool:
 
 def adapt_datetime_iso(value: datetime) -> str:
     """Adapt datetime.datetime to timezone-naive ISO 8601 date."""
-    return value.replace(tzinfo=ZoneInfo(TIMEZONE)).isoformat(
+    return value.replace(tzinfo=TIMEZONE).isoformat(
         sep=" ", timespec="seconds"
     )
 
 
 def convert_datetime(value: bytes) -> datetime:
     """Convert ISO 8601 datetime to datetime.datetime object."""
-    return datetime.fromisoformat(value.decode()).replace(
-        tzinfo=ZoneInfo(TIMEZONE)
-    )
+    return datetime.fromisoformat(value.decode()).replace(tzinfo=TIMEZONE)
 
 
 async def format_message_data(message: Message) -> str:
@@ -219,9 +217,7 @@ async def format_message_data(message: Message) -> str:
     user_name = message.from_user.full_name
     user_bio = (await BOT.get_chat(chat_id=user_id)).bio
     message_id = message.message_id
-    message_date = message.date.astimezone(
-        ZoneInfo(TIMEZONE)
-    ).strftime(DATE_FORMAT)
+    message_date = message.date.astimezone(TIMEZONE).strftime(DATE_FORMAT)
     message_text = message.text
 
     data = {
@@ -339,7 +335,7 @@ async def message_handler(message: Message) -> None:
         ).fetchone()
 
         if result is None:
-            first_seen = datetime.now(tz=ZoneInfo(TIMEZONE))
+            first_seen = datetime.now(tz=TIMEZONE)
             violations = 0
 
             db_cursor.execute(
@@ -359,12 +355,12 @@ async def message_handler(message: Message) -> None:
     ).fetchone()
 
     if result is None:
-        first_seen = datetime.now(tz=ZoneInfo(TIMEZONE))
+        first_seen = datetime.now(tz=TIMEZONE)
         member_time = timedelta(0)
         violations = 1
     else:
         first_seen, violations = result
-        member_time = datetime.now(tz=ZoneInfo(TIMEZONE)) - first_seen
+        member_time = datetime.now(tz=TIMEZONE) - first_seen
         violations += 1
 
     result = db_cursor.execute(
@@ -410,7 +406,7 @@ async def logs_menu_callback_query_handler(
 
     sender_user_id = callback_query.from_user.id
 
-    now = datetime.now()
+    now = datetime.now(tz=TIMEZONE)
     delta = timedelta(**{unit: value})
     start = now - delta
 
