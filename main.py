@@ -246,7 +246,9 @@ def get_log_entries(
 
     for entry in file_lines[::-1]:
         try:
-            date = datetime.strptime(entry[:18], DATE_FORMAT)
+            date = datetime.strptime(entry[:19], DATE_FORMAT).replace(
+                tzinfo=TIMEZONE
+            )
         except ValueError:
             continue
 
