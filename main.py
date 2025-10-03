@@ -255,6 +255,10 @@ def get_log_entries(
         if ((date >= start) and (date <= end)):
             entries.append(entry)
 
+        d = timedelta(seconds=60)
+        if ((start - date) > d) or ((date - end) > d):
+            break
+
     return entries[::-1]
 
 
