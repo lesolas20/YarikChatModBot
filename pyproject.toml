@@ -1,0 +1,34 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 79
+indent-width = 4
+lint.select = [
+  "A",
+  "ARG",
+  "ASYNC",
+  "B",
+  "C4",
+  "C90",
+  "COM",
+  "DOC",
+  "DTZ",
+  "E",
+  "F",
+  "FLY",
+  "I",
+  "LOG",
+  "N",
+  "PERF",
+  "PIE",
+  "PL",
+  "PTH",
+  "RET",
+  "RUF",
+  "S",
+  "SIM",
+  "UP",
+  "W",
+]
+lint.ignore = [ "SIM108" ]
+lint.isort.length-sort = true
+lint.pycodestyle.max-doc-length = 72
