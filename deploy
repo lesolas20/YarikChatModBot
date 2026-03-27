@@ -1,0 +1,13 @@
+#!/bin/bash
+
+db_name="db.sqlite"
+
+sqlite3 "$db_name" <<EOF
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    first_seen DATETIME NOT NULL,
+    violations INTEGER NOT NULL
+);
+EOF
+
+uv run main.py
