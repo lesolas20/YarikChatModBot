@@ -1,8 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -e
 
-db_name="db.sqlite"
+DB_NAME="db.sqlite"
+LOG_NAME="logfile.log"
 
-sqlite3 "$db_name" <<EOF
+IMAGE_NAME="yarik-chat-mod-bot"
+CONTAINER_NAME="yarik-chat-mod-bot"
+
+sqlite3 "$DB_NAME" <<EOF
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
     first_seen DATETIME NOT NULL,
@@ -10,4 +15,25 @@ CREATE TABLE IF NOT EXISTS users (
 );
 EOF
 
-uv run main.py
+if podman image exists "$IMAGE_NAME"; then
+    echo "Image $IMAGE_NAME already exists, skipping build."
+else
+    echo "Building image..."
+    podman build -t "$IMAGE_NAME" .
+fi
+
+echo "Stopping old container (if exists)..."
+podman stop "$CONTAINER_NAME" 2>/dev/null || true
+
+echo "Removing old container (if exists)..."
+podman rm "$CONTAINER_NAME" 2>/dev/null || true
+
+echo "Starting new container..."
+
+podman run --detach \
+    --name "$CONTAINER_NAME" \
+    --mount type=bind,source="$DB_NAME",target="/app/$DB_NAME" \
+    --mount type=bind,source="$LOG_NAME",target="/app/$LOG_NAME" \
+    "$IMAGE_NAME"
+
+echo "Container is running."
