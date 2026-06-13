@@ -59,19 +59,30 @@ class Text:
     no_data = "No data available"
     forbidden_command = "You are not allowed to use this command"
 
-    recieved_private = "The private message {} from user {} in chat {} is recieved. Message details: "  # noqa: E501
-    recieved_public = "The message {} from user {} in chat {} is recieved. Message details: "  # noqa: E501
+    recieved_private = (
+        "The private message {} from user {} in chat {} is recieved."
+        " Message details: "
+    )
+    recieved_public = (
+        "The message {} from user {} in chat {} is recieved. Message details: "
+    )
     recieved_join = "The user {} joined chat {}."
 
-    unsupported_chat = "Chat {} is not supported. Message {} from user {} ignored."  # noqa: E501
+    unsupported_chat = (
+        "Chat {} is not supported. Message {} from user {} ignored."
+    )
     trusted_user = "The user {} in chat {} is trusted. Message {} ignored."
     message_valid = "The message {} from user {} in chat {} is valid."
     message_invalid = "The message {} from user {} in chat {} is invalid."
 
     ban_fail = "Failed to block the user {} in chat {} from message {}."
-    ban_success = "Successfully blocked the user {} in chat {} from message {}."  # noqa: E501
+    ban_success = (
+        "Successfully blocked the user {} in chat {} from message {}."
+    )
     unban_fail = "Failed to unblock the user {} in chat {} from message {}."
-    unban_success = "Successfully unblocked the user {} in chat {} from message {}."  # noqa: E501
+    unban_success = (
+        "Successfully unblocked the user {} in chat {} from message {}."
+    )
 
     displayed_logs = "Displayed the log entries to the user {}."
     no_logs_data = "No log entries to display to the user {}."
@@ -142,7 +153,7 @@ def normalize_text(text: str) -> str:
 
 
 def is_in_valid_chat(message: Message) -> bool:
-    return (message.chat.id in VALID_CHATS)
+    return message.chat.id in VALID_CHATS
 
 
 def is_trusted(message: Message) -> bool:
@@ -195,7 +206,7 @@ def validate_text(text: str | None) -> bool:
 
     text = normalize_text(text)
 
-    ratios = [0]
+    ratios: list[float] = [0]
 
     for phrase in BANNED_PHRASES:
         if phrase in text:
@@ -241,7 +252,7 @@ async def process_invalid_message(
         member_time = datetime.now(tz=TIMEZONE) - first_seen
         violations += 1
 
-    result = db_cursor.execute(
+    db_cursor.execute(
         """INSERT INTO users (id, first_seen, violations)
         VALUES (?, ?, ?)
         ON CONFLICT (id)
@@ -428,7 +439,7 @@ async def message_handler(message: Message) -> None:
         logger.info(Text.trusted_user.format(user_id, chat_id, message_id))
         return
 
-    if (await is_valid(message)):
+    if await is_valid(message):
         logger.info(Text.message_valid.format(message_id, user_id, chat_id))
 
         result = db_cursor.execute(
@@ -638,8 +649,7 @@ if __name__ == "__main__":
     with Path("banned_phrases.json").open() as file:
         file_text = file.read()
     BANNED_PHRASES: list[str] = [
-        normalize_text(phrase)
-        for phrase in json.loads(file_text)
+        normalize_text(phrase) for phrase in json.loads(file_text)
     ]
 
     with Path("valid_chats.json").open() as file:
