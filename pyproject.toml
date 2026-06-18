@@ -1,16 +1,16 @@
 [project]
 name = "YarikChatModBot"
-version = "2.0.0"
-requires-python = ">=3.11"
+version = "3.0.0"
+requires-python = ">=3.13"
 dependencies = [
-  "aiogram>=3.26",
+  "aiogram>=3.29",
   "dotenv>=0.9.9",
   "levenshtein>=0.27.3",
   "unidecode>=1.4",
 ]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py313"
 line-length = 79
 indent-width = 4
 lint.select = [

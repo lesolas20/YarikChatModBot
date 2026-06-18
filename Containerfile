@@ -6,7 +6,7 @@ ENV UV_PYTHON_INSTALL_DIR=/python
 ENV UV_PYTHON_CACHE_DIR=/root/.cache/uv/python
 ENV UV_PYTHON_PREFERENCE=only-managed
 
-RUN uv python install 3.11
+RUN uv python install 3.13
 
 # Install dependencies
 WORKDIR /app
