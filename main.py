@@ -1,4 +1,3 @@
-import re
 import json
 import atexit
 import asyncio
@@ -8,22 +7,14 @@ from os import getenv
 from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from functools import cache
 
 import Levenshtein
 from dotenv import load_dotenv
 from aiogram import F, Bot, Dispatcher
 from unidecode import unidecode
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    LinkPreviewOptions,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
-from aiogram.filters import IS_MEMBER, IS_NOT_MEMBER, CommandStart
+from aiogram.types import Message
+from aiogram.filters import IS_MEMBER, IS_NOT_MEMBER
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters.callback_data import CallbackData
 from aiogram.filters.chat_member_updated import (
     ChatMemberUpdated,
     ChatMemberUpdatedFilter,
@@ -40,25 +31,10 @@ BANNED_PHRASES: list[str] = []
 VALID_CHATS: list[int] = []
 ADMINS: list[dict[str, int | str]] = []
 
-LOGS_MENU = (
-    ("Last 15 minutes", 15, "minutes"),
-    ("Last hour", 1, "hours"),
-    ("Last 4 hours", 4, "hours"),
-    ("Last 24 hours", 1, "days"),
-    ("Last week", 7, "days"),
-    ("Last month", 30, "days"),
-)
-
 dispatcher = Dispatcher()
 
 
 class Text:
-    ban = "Ban"
-    unban = "Unban"
-    select_logs = "Select the time frame to view the logs:"
-    no_data = "No data available"
-    forbidden_command = "You are not allowed to use this command"
-
     recieved_private = (
         "The private message {} from user {} in chat {} is recieved."
         " Message details: "
@@ -79,73 +55,6 @@ class Text:
     ban_success = (
         "Successfully blocked the user {} in chat {} from message {}."
     )
-    unban_fail = "Failed to unblock the user {} in chat {} from message {}."
-    unban_success = (
-        "Successfully unblocked the user {} in chat {} from message {}."
-    )
-
-    displayed_logs = "Displayed the log entries to the user {}."
-    no_logs_data = "No log entries to display to the user {}."
-
-
-class LogsMenuCallback(CallbackData, prefix="log", sep=" "):
-    time_value: int
-    time_unit: str
-
-
-class BanUserCallback(CallbackData, prefix="ban", sep=" "):
-    user_id: int
-    chat_id: int
-    message_id: int
-
-
-class UnbanUserCallback(CallbackData, prefix="unban", sep=" "):
-    user_id: int
-    chat_id: int
-    message_id: int
-
-
-@cache
-def get_logs_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=text,
-                    callback_data=LogsMenuCallback(
-                        time_value=time_value,
-                        time_unit=time_unit,
-                    ).pack(),
-                ),
-            ]
-            for text, time_value, time_unit in LOGS_MENU
-        ],
-    )
-
-
-def get_ban_user_keyboard(
-    user_id: int,
-    chat_id: int,
-    message_id: int,
-) -> InlineKeyboardMarkup:
-    button1 = InlineKeyboardButton(
-        text=Text.ban,
-        callback_data=BanUserCallback(
-            user_id=user_id,
-            chat_id=chat_id,
-            message_id=message_id,
-        ).pack(),
-    )
-    button2 = InlineKeyboardButton(
-        text=Text.unban,
-        callback_data=UnbanUserCallback(
-            user_id=user_id,
-            chat_id=chat_id,
-            message_id=message_id,
-        ).pack(),
-    )
-
-    return InlineKeyboardMarkup(inline_keyboard=[[button1, button2]])
 
 
 def normalize_text(text: str) -> str:
@@ -323,67 +232,6 @@ async def format_message_data(message: Message) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
-def get_log_entries(
-    filename: str,
-    start: datetime,
-    end: datetime,
-) -> list[str]:
-    entries = []
-
-    with Path(filename).open() as file:
-        file_lines = file.readlines()
-
-    for entry in file_lines[::-1]:
-        try:
-            date = datetime.strptime(entry[:19], DATE_FORMAT).replace(
-                tzinfo=TIMEZONE,
-            )
-        except ValueError:
-            continue
-
-        if (date >= start) and (date <= end):
-            entries.append(entry)
-
-        d = timedelta(seconds=60)
-        if ((start - date) > d) or ((date - end) > d):
-            break
-
-    return entries[::-1]
-
-
-def unformat(text: str, pattern: str) -> list | None:
-    pattern = pattern.replace("{}", "(.*)")
-
-    match = re.match(pattern, text)
-
-    if not match:
-        return None
-
-    return list(match.groups())
-
-
-@dispatcher.message(CommandStart())
-async def start_message_handler(message: Message) -> None:
-    # This assertion should never fail, because if a user can send a
-    # start command to a bot, they always have valid `from_user` field.
-    assert message.from_user is not None  # noqa: S101
-
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    message_id = message.message_id
-
-    log_text = Text.recieved_private.format(message_id, user_id, chat_id)
-    log_text += await format_message_data(message)
-
-    if is_trusted(message):
-        menu = await message.answer(
-            Text.select_logs,
-            reply_markup=get_logs_menu_keyboard(),
-        )
-        await menu.pin()
-
-    else:
-        await message.answer(Text.forbidden_command)
 
 
 @dispatcher.message(F.chat.type == "private")
@@ -466,124 +314,6 @@ async def message_handler(message: Message) -> None:
 @dispatcher.edited_message()
 async def edited_message_handler(message: Message) -> None:
     await message_handler(message)
-
-
-@dispatcher.callback_query(LogsMenuCallback.filter())
-async def logs_menu_callback_query_handler(
-    callback_query: CallbackQuery,
-    callback_data: LogsMenuCallback,
-) -> None:
-    if not isinstance(callback_query.message, Message):
-        # The message became inaccessible before the bot could process
-        # it, so don't try to process it
-        return
-
-    unit = callback_data.time_unit
-    value = callback_data.time_value
-
-    sender_user_id = callback_query.from_user.id
-
-    now = datetime.now(tz=TIMEZONE)
-    delta = timedelta(**{unit: value})
-    start = now - delta
-
-    entries = get_log_entries(filename=LOG_PATH, start=start, end=now)
-
-    if entries:
-        for entry in entries:
-            ids = unformat(entry[22:], Text.recieved_public)
-
-            if ids:
-                user_id = int(ids[1])
-                chat_id = int(ids[2])
-                message_id = int(ids[0])
-
-                keyboard = get_ban_user_keyboard(user_id, chat_id, message_id)
-            else:
-                keyboard = None
-
-            await callback_query.message.answer(
-                entry,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-                reply_markup=keyboard,
-            )
-
-        logger.info(Text.displayed_logs.format(sender_user_id))
-
-    else:
-        await callback_query.message.answer(Text.no_data)
-        logger.info(Text.no_logs_data.format(sender_user_id))
-
-    await callback_query.answer()
-
-
-@dispatcher.callback_query(BanUserCallback.filter())
-async def ban_user_callback_query_handler(
-    callback_query: CallbackQuery,
-    callback_data: BanUserCallback,
-) -> None:
-    if not isinstance(callback_query.message, Message):
-        # The message became inaccessible before the bot could process
-        # it, so don't try to process it
-        return
-
-    message = callback_query.message
-
-    user_id = callback_data.user_id
-    chat_id = callback_data.chat_id
-    message_id = callback_data.message_id
-
-    try:
-        await BOT.delete_message(chat_id=chat_id, message_id=message_id)
-        await BOT.ban_chat_member(chat_id=chat_id, user_id=user_id)
-
-    except TelegramBadRequest:
-        text = Text.ban_fail.format(user_id, chat_id, message_id)
-        await message.answer(text)
-        logger.info(text)
-
-    else:
-        text = Text.ban_success.format(user_id, chat_id, message_id)
-        await message.answer(text, reply_markup=message.reply_markup)
-        logger.info(text)
-
-    await callback_query.answer()
-
-
-@dispatcher.callback_query(UnbanUserCallback.filter())
-async def unban_user_callback_query_handler(
-    callback_query: CallbackQuery,
-    callback_data: UnbanUserCallback,
-) -> None:
-    if not isinstance(callback_query.message, Message):
-        # The message became inaccessible before the bot could process
-        # it, so don't try to process it
-        return
-
-    message = callback_query.message
-
-    user_id = callback_data.user_id
-    chat_id = callback_data.chat_id
-    message_id = callback_data.message_id
-
-    try:
-        await BOT.unban_chat_member(
-            chat_id=chat_id,
-            user_id=user_id,
-            only_if_banned=True,
-        )
-
-    except TelegramBadRequest:
-        text = Text.unban_fail.format(user_id, chat_id, message_id)
-        await message.answer(text)
-        logger.info(text)
-
-    else:
-        text = Text.unban_success.format(user_id, chat_id, message_id)
-        await message.answer(text, reply_markup=message.reply_markup)
-        logger.info(text)
-
-    await callback_query.answer()
 
 
 async def main() -> None:
