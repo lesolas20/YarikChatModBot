@@ -6,7 +6,6 @@ import sqlite3
 from os import getenv
 from pathlib import Path
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import Levenshtein
 from dotenv import load_dotenv
@@ -21,9 +20,8 @@ from aiogram.filters.chat_member_updated import (
 )
 
 LOG_PATH: str = "logfile.log"
-DATE_FORMAT: str = "%d.%m.%Y %H:%M:%S"
-
-TIMEZONE = ZoneInfo("Europe/Kyiv")
+LOG_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S.%f%:z"
+MESSAGE_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S%:z"
 
 BOT: Bot
 
@@ -32,6 +30,18 @@ VALID_CHATS: list[int] = []
 ADMINS: list[dict[str, int | str]] = []
 
 dispatcher = Dispatcher()
+
+
+class LoggingFormatter(logging.Formatter):
+    """Override logging.Formatter to use aware datetime objects."""
+
+    def formatTime(self, record, datefmt=None):  # noqa: N802
+        dt = datetime.fromtimestamp(record.created).astimezone()
+
+        if datefmt:
+            return dt.strftime(datefmt)
+
+        return dt.isoformat(timespec="milliseconds")
 
 
 class Text:
@@ -127,17 +137,14 @@ def validate_text(text: str | None) -> bool:
     return max(ratios) < max_valid_ratio
 
 
-def adapt_datetime_iso(value: datetime) -> str:
-    """Adapt datetime.datetime to timezone-naive ISO 8601 date."""
-    return value.replace(tzinfo=TIMEZONE).isoformat(
-        sep=" ",
-        timespec="seconds",
-    )
+def adapt_datetime(value: datetime) -> str:
+    """Adapt a `datetime.datetime` object to an ISO 8601 date."""
+    return value.isoformat(sep=" ", timespec="seconds")
 
 
 def convert_datetime(value: bytes) -> datetime:
-    """Convert ISO 8601 datetime to datetime.datetime object."""
-    return datetime.fromisoformat(value.decode()).replace(tzinfo=TIMEZONE)
+    """Convert an ISO 8601 datetime to a `datetime.datetime` object."""
+    return datetime.fromisoformat(value.decode())
 
 
 async def process_invalid_message(
@@ -153,12 +160,12 @@ async def process_invalid_message(
     ).fetchone()
 
     if result is None:
-        first_seen = datetime.now(tz=TIMEZONE)
+        first_seen = datetime.now().astimezone()
         member_time = timedelta(0)
         violations = 1
     else:
         first_seen, violations = result
-        member_time = datetime.now(tz=TIMEZONE) - first_seen
+        member_time = datetime.now().astimezone() - first_seen
         violations += 1
 
     db_cursor.execute(
@@ -215,7 +222,7 @@ async def format_message_data(message: Message) -> str:
     chat_title = message.chat.title
     user_bio = (await BOT.get_chat(chat_id=user_id)).bio
     message_id = message.message_id
-    message_date = message.date.astimezone(TIMEZONE).strftime(DATE_FORMAT)
+    message_date = message.date.astimezone().strftime(MESSAGE_DATE_FORMAT)
     message_text = message.text
 
     data = {
@@ -296,7 +303,7 @@ async def message_handler(message: Message) -> None:
         ).fetchone()
 
         if result is None:
-            first_seen = datetime.now(tz=TIMEZONE)
+            first_seen = datetime.now().astimezone()
             violations = 0
 
             db_cursor.execute(
@@ -357,9 +364,9 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter(
+    formatter = LoggingFormatter(
         "%(asctime)s - %(message)s",
-        datefmt=DATE_FORMAT,
+        datefmt=LOG_DATE_FORMAT,
     )
 
     stream_handler = logging.StreamHandler()
@@ -393,7 +400,7 @@ if __name__ == "__main__":
     )
     db_cursor = db_connection.cursor()
 
-    sqlite3.register_adapter(datetime, adapt_datetime_iso)
+    sqlite3.register_adapter(datetime, adapt_datetime)
     sqlite3.register_converter("datetime", convert_datetime)
 
     # Run the bot
