@@ -19,8 +19,8 @@ from aiogram.filters.chat_member_updated import (
     ChatMemberUpdatedFilter,
 )
 
-LOG_PATH: str = "logfile.log"
-LOG_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S.%f%:z"
+from utils.logging import setup as setup_logging
+
 MESSAGE_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S%:z"
 
 BOT: Bot
@@ -30,18 +30,6 @@ VALID_CHATS: list[int] = []
 ADMINS: list[dict[str, int | str]] = []
 
 dispatcher = Dispatcher()
-
-
-class LoggingFormatter(logging.Formatter):
-    """Override logging.Formatter to use aware datetime objects."""
-
-    def formatTime(self, record, datefmt=None):  # noqa: N802
-        dt = datetime.fromtimestamp(record.created).astimezone()
-
-        if datefmt:
-            return dt.strftime(datefmt)
-
-        return dt.isoformat(timespec="milliseconds")
 
 
 class Text:
@@ -360,25 +348,9 @@ def cleanup() -> None:
 
 
 if __name__ == "__main__":
-    # Setup logging
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
 
-    formatter = LoggingFormatter(
-        "%(asctime)s - %(message)s",
-        datefmt=LOG_DATE_FORMAT,
-    )
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.DEBUG)
-    stream_handler.setFormatter(formatter)
-
-    file_handler = logging.FileHandler(LOG_PATH)
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-
-    logger.addHandler(stream_handler)
-    logger.addHandler(file_handler)
+    setup_logging()
 
     # Load data
     load_dotenv()
