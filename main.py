@@ -3,14 +3,10 @@ import atexit
 import asyncio
 import logging
 import sqlite3
-from os import getenv
-from pathlib import Path
 from datetime import datetime, timedelta
 
 import Levenshtein
-from dotenv import load_dotenv
 from aiogram import F, Bot, Dispatcher
-from unidecode import unidecode
 from aiogram.enums import ChatType
 from aiogram.types import User, Message
 from aiogram.filters import IS_MEMBER, IS_NOT_MEMBER
@@ -20,6 +16,8 @@ from aiogram.filters.chat_member_updated import (
     ChatMemberUpdatedFilter,
 )
 
+from utils.misc import normalize_text
+from utils.config import load_config
 from utils.logging import setup as setup_logging
 
 MESSAGE_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S%:z"
@@ -53,10 +51,6 @@ class Text:
     ban_success = (
         "Successfully blocked the user {} in chat {} from message {}."
     )
-
-
-def normalize_text(text: str) -> str:
-    return unidecode(text).lower().replace(" ", "").replace("\n", "")
 
 
 def is_in_valid_chat(message: Message) -> bool:
@@ -317,20 +311,6 @@ async def message_handler(message: Message) -> None:
     await process_invalid_message(message_id, user_id, chat_id)
 
 
-async def main() -> None:
-    global BOT  # noqa: PLW0603
-
-    token: str | None = getenv("TOKEN")
-    if token is None:
-        logger.critical("No bot token found, aborting")
-        return
-
-    BOT = Bot(token=token)
-
-    # Run events dispatching
-    await dispatcher.start_polling(BOT)
-
-
 @atexit.register
 def cleanup() -> None:
     db_cursor.close()
@@ -342,18 +322,10 @@ if __name__ == "__main__":
 
     setup_logging()
 
-    # Load data
-    load_dotenv()
+    config = load_config()
 
-    with Path("banned_phrases.json").open() as file:
-        file_text = file.read()
-    BANNED_PHRASES: list[str] = [
-        normalize_text(phrase) for phrase in json.loads(file_text)
-    ]
-
-    with Path("valid_chats.json").open() as file:
-        file_text = file.read()
-    VALID_CHATS: list[int] = json.loads(file_text)
+    BANNED_PHRASES = config.banned_phrases
+    VALID_CHATS = config.valid_chats
 
     # Setup the database
     db_connection = sqlite3.connect(
@@ -365,5 +337,7 @@ if __name__ == "__main__":
     sqlite3.register_adapter(datetime, adapt_datetime)
     sqlite3.register_converter("datetime", convert_datetime)
 
+    BOT = Bot(token=config.bot_token)
+
     # Run the bot
-    asyncio.run(main())
+    asyncio.run(dispatcher.start_polling(BOT))
