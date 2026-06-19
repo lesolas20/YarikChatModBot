@@ -12,9 +12,9 @@ from dotenv import load_dotenv
 from aiogram import F, Bot, Dispatcher
 from unidecode import unidecode
 from aiogram.enums import ChatType
-from aiogram.types import Message
+from aiogram.types import User, Message
 from aiogram.filters import IS_MEMBER, IS_NOT_MEMBER
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import AiogramError, TelegramBadRequest
 from aiogram.filters.chat_member_updated import (
     ChatMemberUpdated,
     ChatMemberUpdatedFilter,
@@ -28,7 +28,6 @@ BOT: Bot
 
 BANNED_PHRASES: list[str] = []
 VALID_CHATS: list[int] = []
-ADMINS: list[dict[str, int | str]] = []
 
 dispatcher = Dispatcher()
 
@@ -64,18 +63,28 @@ def is_in_valid_chat(message: Message) -> bool:
     return message.chat.id in VALID_CHATS
 
 
-def is_trusted(message: Message) -> bool:
-    if message.from_user is None:
-        # The `from_user` field may be empty for messages sent to
+async def is_trusted(user: User | None) -> bool:
+    if user is None:
+        # `user` may be `None` for messages sent to
         # channels, so assume the user to be trusted.
         # Source: https://core.telegram.org/bots/api#message
         return True
 
+    admins: list[int] = []
+
+    for chat_id in VALID_CHATS:
+        try:
+            chat_admins = await BOT.get_chat_administrators(chat_id=chat_id)
+        except AiogramError:
+            continue
+
+        admins.extend(member.user.id for member in chat_admins)
+
     return any(
         (
-            message.from_user.is_bot,
-            (message.from_user.id in [admin["id"] for admin in ADMINS]),
-            (message.from_user.id == 777000),  # noqa: PLR2004, ID 777000 is Telegram itself and is trusted
+            user.is_bot,
+            (user.id in admins),
+            (user.id == 777000),  # noqa: PLR2004, ID 777000 is Telegram itself and is trusted
         ),
     )
 
@@ -280,7 +289,7 @@ async def message_handler(message: Message) -> None:
         logger.info(Text.unsupported_chat.format(chat_id, message_id, user_id))
         return
 
-    if is_trusted(message):
+    if await is_trusted(message.from_user):
         logger.info(Text.trusted_user.format(user_id, chat_id, message_id))
         return
 
@@ -309,7 +318,6 @@ async def message_handler(message: Message) -> None:
 
 
 async def main() -> None:
-    global ADMINS  # noqa: PLW0602
     global BOT  # noqa: PLW0603
 
     token: str | None = getenv("TOKEN")
@@ -318,21 +326,6 @@ async def main() -> None:
         return
 
     BOT = Bot(token=token)
-
-    # Get admins of all supported chats
-    for chat_id in VALID_CHATS:
-        admins = await BOT.get_chat_administrators(chat_id=chat_id)
-        ADMINS.extend(
-            [
-                {"name": admin.user.full_name, "id": admin.user.id}
-                for admin in admins
-            ],
-        )
-
-    _admins = ", ".join(
-        {f"{admin['name']} ({admin['id']})" for admin in ADMINS},
-    )
-    logger.debug(f"Current admins: {_admins}")
 
     # Run events dispatching
     await dispatcher.start_polling(BOT)
