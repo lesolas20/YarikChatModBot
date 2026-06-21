@@ -3,6 +3,7 @@ import atexit
 import asyncio
 import logging
 import sqlite3
+import contextlib
 from datetime import datetime, timedelta
 
 import Levenshtein
@@ -310,8 +311,9 @@ async def message_handler(message: Message, config: Config) -> None:
 
 @atexit.register
 def cleanup() -> None:
-    db_cursor.close()
-    db_connection.close()
+    with contextlib.suppress(NameError):
+        db_cursor.close()
+        db_connection.close()
 
 
 if __name__ == "__main__":
