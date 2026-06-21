@@ -17,15 +17,12 @@ from aiogram.filters.chat_member_updated import (
 )
 
 from utils.misc import normalize_text
-from utils.config import load_config
+from utils.config import Config, load_config
 from utils.logging import setup as setup_logging
 
 MESSAGE_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S%:z"
 
 BOT: Bot
-
-BANNED_PHRASES: list[str] = []
-VALID_CHATS: list[int] = []
 
 dispatcher = Dispatcher()
 
@@ -53,11 +50,11 @@ class Text:
     )
 
 
-def is_in_valid_chat(message: Message) -> bool:
-    return message.chat.id in VALID_CHATS
+def is_in_valid_chat(message: Message, valid_chats: list[int]) -> bool:
+    return message.chat.id in valid_chats
 
 
-async def is_trusted(user: User | None) -> bool:
+async def is_trusted(user: User | None, valid_chats: list[int]) -> bool:
     if user is None:
         # `user` may be `None` for messages sent to
         # channels, so assume the user to be trusted.
@@ -66,7 +63,7 @@ async def is_trusted(user: User | None) -> bool:
 
     admins: list[int] = []
 
-    for chat_id in VALID_CHATS:
+    for chat_id in valid_chats:
         try:
             chat_admins = await BOT.get_chat_administrators(chat_id=chat_id)
         except AiogramError:
@@ -83,7 +80,7 @@ async def is_trusted(user: User | None) -> bool:
     )
 
 
-async def is_valid(message: Message) -> bool:
+async def is_valid(message: Message, banned_phrases: list[str]) -> bool:
     if message.from_user is None:
         # The `from_user` field may be empty for messages sent to
         # channels, so assume the message to be valid.
@@ -95,14 +92,14 @@ async def is_valid(message: Message) -> bool:
 
     return all(
         (
-            validate_text(user_bio),
-            validate_text(message.text),
-            validate_text(message.caption),
+            validate_text(user_bio, banned_phrases),
+            validate_text(message.text, banned_phrases),
+            validate_text(message.caption, banned_phrases),
         ),
     )
 
 
-def validate_text(text: str | None) -> bool:
+def validate_text(text: str | None, banned_phrases: list[str]) -> bool:
     """Return `True` if `text` is valid, return `False` otherwise"""
 
     min_validatable_length = 20
@@ -119,7 +116,7 @@ def validate_text(text: str | None) -> bool:
 
     ratios: list[float] = [0]
 
-    for phrase in BANNED_PHRASES:
+    for phrase in banned_phrases:
         if phrase in text:
             return False
 
@@ -260,7 +257,7 @@ async def user_join_handler(event: ChatMemberUpdated) -> None:
 @dispatcher.edited_message(
     F.chat.type.in_((ChatType.GROUP, ChatType.SUPERGROUP)),
 )
-async def message_handler(message: Message) -> None:
+async def message_handler(message: Message, config: Config) -> None:
     if message.from_user is None:
         # The `from_user` field may be empty for messages sent to
         # channels, so set the child fields to placeholder values.
@@ -279,15 +276,15 @@ async def message_handler(message: Message) -> None:
 
     logger.info(log_text)
 
-    if not is_in_valid_chat(message):
+    if not is_in_valid_chat(message, config.valid_chats):
         logger.info(Text.unsupported_chat.format(chat_id, message_id, user_id))
         return
 
-    if await is_trusted(message.from_user):
+    if await is_trusted(message.from_user, config.valid_chats):
         logger.info(Text.trusted_user.format(user_id, chat_id, message_id))
         return
 
-    if await is_valid(message):
+    if await is_valid(message, config.banned_phrases):
         logger.info(Text.message_valid.format(message_id, user_id, chat_id))
 
         result = db_cursor.execute(
@@ -324,9 +321,6 @@ if __name__ == "__main__":
 
     config = load_config()
 
-    BANNED_PHRASES = config.banned_phrases
-    VALID_CHATS = config.valid_chats
-
     # Setup the database
     db_connection = sqlite3.connect(
         "db.sqlite",
@@ -340,4 +334,4 @@ if __name__ == "__main__":
     BOT = Bot(token=config.bot_token)
 
     # Run the bot
-    asyncio.run(dispatcher.start_polling(BOT))
+    asyncio.run(dispatcher.start_polling(BOT, config=config))
