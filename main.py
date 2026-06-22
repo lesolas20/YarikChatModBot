@@ -11,6 +11,7 @@ import Levenshtein
 from dotenv import load_dotenv
 from aiogram import F, Bot, Dispatcher
 from unidecode import unidecode
+from aiogram.enums import ChatType
 from aiogram.types import Message
 from aiogram.filters import IS_MEMBER, IS_NOT_MEMBER
 from aiogram.exceptions import TelegramBadRequest
@@ -227,8 +228,6 @@ async def format_message_data(message: Message) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
-
-
 @dispatcher.message(F.chat.type == "private")
 async def private_message_handler(message: Message) -> None:
     # This assertion should never fail, because if a user can send a
@@ -254,7 +253,10 @@ async def user_join_handler(event: ChatMemberUpdated) -> None:
     logger.info(Text.recieved_join.format(user_id, chat_id))
 
 
-@dispatcher.message()
+@dispatcher.message(F.chat.type.in_((ChatType.GROUP, ChatType.SUPERGROUP)))
+@dispatcher.edited_message(
+    F.chat.type.in_((ChatType.GROUP, ChatType.SUPERGROUP)),
+)
 async def message_handler(message: Message) -> None:
     if message.from_user is None:
         # The `from_user` field may be empty for messages sent to
@@ -304,11 +306,6 @@ async def message_handler(message: Message) -> None:
         return
 
     await process_invalid_message(message_id, user_id, chat_id)
-
-
-@dispatcher.edited_message()
-async def edited_message_handler(message: Message) -> None:
-    await message_handler(message)
 
 
 async def main() -> None:
