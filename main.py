@@ -141,6 +141,7 @@ async def process_invalid_message(
     message_id: int,
     user_id: int,
     chat_id: int,
+    db_cursor: sqlite3.Cursor,
 ) -> None:
     logger.info(Text.message_invalid.format(message_id, user_id, chat_id))
 
@@ -165,7 +166,7 @@ async def process_invalid_message(
         DO UPDATE SET violations = ?""",
         (user_id, first_seen, violations, violations),
     )
-    db_connection.commit()
+    db_cursor.connection.commit()
 
     violation_limits: tuple[tuple[timedelta, int], ...] = (
         (timedelta(days=2), 1),
@@ -258,7 +259,11 @@ async def user_join_handler(event: ChatMemberUpdated) -> None:
 @dispatcher.edited_message(
     F.chat.type.in_((ChatType.GROUP, ChatType.SUPERGROUP)),
 )
-async def message_handler(message: Message, config: Config) -> None:
+async def message_handler(
+    message: Message,
+    config: Config,
+    db_cursor: sqlite3.Cursor,
+) -> None:
     if message.from_user is None:
         # The `from_user` field may be empty for messages sent to
         # channels, so set the child fields to placeholder values.
@@ -302,18 +307,23 @@ async def message_handler(message: Message, config: Config) -> None:
                 VALUES (?, ?, ?)""",
                 (user_id, first_seen, violations),
             )
-            db_connection.commit()
+            db_cursor.connection.commit()
 
         return
 
-    await process_invalid_message(message_id, user_id, chat_id)
+    await process_invalid_message(
+        message_id,
+        user_id,
+        chat_id,
+        db_cursor,
+    )
 
 
 @atexit.register
 def cleanup() -> None:
     with contextlib.suppress(NameError):
         db_cursor.close()
-        db_connection.close()
+        db_cursor.connection.close()
 
 
 if __name__ == "__main__":
@@ -336,4 +346,10 @@ if __name__ == "__main__":
     BOT = Bot(token=config.bot_token)
 
     # Run the bot
-    asyncio.run(dispatcher.start_polling(BOT, config=config))
+    asyncio.run(
+        dispatcher.start_polling(
+            BOT,
+            config=config,
+            db_cursor=db_cursor,
+        ),
+    )
