@@ -2,7 +2,6 @@ import json
 import atexit
 import asyncio
 import logging
-import sqlite3
 import contextlib
 from datetime import datetime, timedelta
 
@@ -20,6 +19,7 @@ from aiogram.filters.chat_member_updated import (
 from utils.misc import normalize_text
 from utils.config import Config, load_config
 from utils.logging import setup as setup_logging
+from utils.database import Database
 
 MESSAGE_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S%:z"
 
@@ -127,46 +127,31 @@ def validate_text(text: str | None, banned_phrases: list[str]) -> bool:
     return max(ratios) < max_valid_ratio
 
 
-def adapt_datetime(value: datetime) -> str:
-    """Adapt a `datetime.datetime` object to an ISO 8601 date."""
-    return value.isoformat(sep=" ", timespec="seconds")
-
-
-def convert_datetime(value: bytes) -> datetime:
-    """Convert an ISO 8601 datetime to a `datetime.datetime` object."""
-    return datetime.fromisoformat(value.decode())
-
-
 async def process_invalid_message(
     message_id: int,
     user_id: int,
     chat_id: int,
-    db_cursor: sqlite3.Cursor,
+    database: Database,
 ) -> None:
     logger.info(Text.message_invalid.format(message_id, user_id, chat_id))
 
-    result = db_cursor.execute(
-        "SELECT first_seen, violations FROM users WHERE id = ?",
-        (user_id,),
-    ).fetchone()
+    first_seen = database.get_user_first_seen(user_id)
 
-    if result is None:
+    if first_seen is None:
         first_seen = datetime.now().astimezone()
         member_time = timedelta(0)
         violations = 1
+
     else:
-        first_seen, violations = result
         member_time = datetime.now().astimezone() - first_seen
+        violations = database.get_user_violations(user_id)
+
+        if violations is None:
+            violations = 0
+
         violations += 1
 
-    db_cursor.execute(
-        """INSERT INTO users (id, first_seen, violations)
-        VALUES (?, ?, ?)
-        ON CONFLICT (id)
-        DO UPDATE SET violations = ?""",
-        (user_id, first_seen, violations, violations),
-    )
-    db_cursor.connection.commit()
+    database.insert_or_update_user(user_id, first_seen, violations)
 
     violation_limits: tuple[tuple[timedelta, int], ...] = (
         (timedelta(days=2), 1),
@@ -262,7 +247,7 @@ async def user_join_handler(event: ChatMemberUpdated) -> None:
 async def message_handler(
     message: Message,
     config: Config,
-    db_cursor: sqlite3.Cursor,
+    database: Database,
 ) -> None:
     if message.from_user is None:
         # The `from_user` field may be empty for messages sent to
@@ -293,21 +278,13 @@ async def message_handler(
     if await is_valid(message, config.banned_phrases):
         logger.info(Text.message_valid.format(message_id, user_id, chat_id))
 
-        result = db_cursor.execute(
-            "SELECT * FROM users WHERE id = ?",
-            (user_id,),
-        ).fetchone()
+        if database.user_exists(user_id):
+            return
 
-        if result is None:
-            first_seen = datetime.now().astimezone()
-            violations = 0
+        first_seen = datetime.now().astimezone()
+        violations = 0
 
-            db_cursor.execute(
-                """INSERT INTO users (id, first_seen, violations)
-                VALUES (?, ?, ?)""",
-                (user_id, first_seen, violations),
-            )
-            db_cursor.connection.commit()
+        database.insert_or_update_user(user_id, first_seen, violations)
 
         return
 
@@ -315,15 +292,14 @@ async def message_handler(
         message_id,
         user_id,
         chat_id,
-        db_cursor,
+        database,
     )
 
 
 @atexit.register
 def cleanup() -> None:
     with contextlib.suppress(NameError):
-        db_cursor.close()
-        db_cursor.connection.close()
+        database.close()
 
 
 if __name__ == "__main__":
@@ -333,15 +309,7 @@ if __name__ == "__main__":
 
     config = load_config()
 
-    # Setup the database
-    db_connection = sqlite3.connect(
-        "db.sqlite",
-        detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-    )
-    db_cursor = db_connection.cursor()
-
-    sqlite3.register_adapter(datetime, adapt_datetime)
-    sqlite3.register_converter("datetime", convert_datetime)
+    database = Database("db.sqlite")
 
     BOT = Bot(token=config.bot_token)
 
@@ -350,6 +318,6 @@ if __name__ == "__main__":
         dispatcher.start_polling(
             BOT,
             config=config,
-            db_cursor=db_cursor,
+            database=database,
         ),
     )
