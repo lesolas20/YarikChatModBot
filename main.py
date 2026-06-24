@@ -23,8 +23,6 @@ from utils.database import Database
 
 MESSAGE_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S%:z"
 
-BOT: Bot
-
 dispatcher = Dispatcher()
 
 
@@ -55,7 +53,11 @@ def is_in_valid_chat(message: Message, valid_chats: list[int]) -> bool:
     return message.chat.id in valid_chats
 
 
-async def is_trusted(user: User | None, valid_chats: list[int]) -> bool:
+async def is_trusted(
+    bot: Bot,
+    user: User | None,
+    valid_chats: list[int],
+) -> bool:
     if user is None:
         # `user` may be `None` for messages sent to
         # channels, so assume the user to be trusted.
@@ -66,7 +68,7 @@ async def is_trusted(user: User | None, valid_chats: list[int]) -> bool:
 
     for chat_id in valid_chats:
         try:
-            chat_admins = await BOT.get_chat_administrators(chat_id=chat_id)
+            chat_admins = await bot.get_chat_administrators(chat_id=chat_id)
         except AiogramError:
             continue
 
@@ -81,14 +83,18 @@ async def is_trusted(user: User | None, valid_chats: list[int]) -> bool:
     )
 
 
-async def is_valid(message: Message, banned_phrases: list[str]) -> bool:
+async def is_valid(
+    bot: Bot,
+    message: Message,
+    banned_phrases: list[str],
+) -> bool:
     if message.from_user is None:
         # The `from_user` field may be empty for messages sent to
         # channels, so assume the message to be valid.
         # Source: https://core.telegram.org/bots/api#message
         return True
 
-    user_chat_full_info = await BOT.get_chat(chat_id=message.from_user.id)
+    user_chat_full_info = await bot.get_chat(chat_id=message.from_user.id)
     user_bio = user_chat_full_info.bio
 
     return all(
@@ -128,6 +134,7 @@ def validate_text(text: str | None, banned_phrases: list[str]) -> bool:
 
 
 async def process_invalid_message(
+    bot: Bot,
     message_id: int,
     user_id: int,
     chat_id: int,
@@ -171,8 +178,8 @@ async def process_invalid_message(
 
     if is_over_limit:
         try:
-            await BOT.delete_message(chat_id=chat_id, message_id=message_id)
-            await BOT.ban_chat_member(chat_id=chat_id, user_id=user_id)
+            await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            await bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
 
         except TelegramBadRequest:
             logger.info(Text.ban_fail.format(user_id, chat_id, message_id))
@@ -181,7 +188,7 @@ async def process_invalid_message(
             logger.info(Text.ban_success.format(user_id, chat_id, message_id))
 
 
-async def format_message_data(message: Message) -> str:
+async def format_message_data(bot: Bot, message: Message) -> str:
     if message.from_user is None:
         # The `from_user` field may be empty for messages sent to
         # channels, so set the child fields to placeholder values.
@@ -196,7 +203,7 @@ async def format_message_data(message: Message) -> str:
 
     chat_id = message.chat.id
     chat_title = message.chat.title
-    user_bio = (await BOT.get_chat(chat_id=user_id)).bio
+    user_bio = (await bot.get_chat(chat_id=user_id)).bio
     message_id = message.message_id
     message_date = message.date.astimezone().strftime(MESSAGE_DATE_FORMAT)
     message_text = message.text
@@ -227,7 +234,7 @@ async def private_message_handler(message: Message) -> None:
     message_id = message.message_id
 
     log_text = Text.recieved_private.format(message_id, user_id, chat_id)
-    log_text += await format_message_data(message)
+    log_text += await format_message_data(bot, message)
 
     logger.info(log_text)
 
@@ -246,6 +253,7 @@ async def user_join_handler(event: ChatMemberUpdated) -> None:
 )
 async def message_handler(
     message: Message,
+    bot: Bot,
     config: Config,
     database: Database,
 ) -> None:
@@ -263,7 +271,7 @@ async def message_handler(
     message_id = message.message_id
 
     log_text = Text.recieved_public.format(message_id, user_id, chat_id)
-    log_text += await format_message_data(message)
+    log_text += await format_message_data(bot, message)
 
     logger.info(log_text)
 
@@ -271,11 +279,11 @@ async def message_handler(
         logger.info(Text.unsupported_chat.format(chat_id, message_id, user_id))
         return
 
-    if await is_trusted(message.from_user, config.valid_chats):
+    if await is_trusted(bot, message.from_user, config.valid_chats):
         logger.info(Text.trusted_user.format(user_id, chat_id, message_id))
         return
 
-    if await is_valid(message, config.banned_phrases):
+    if await is_valid(bot, message, config.banned_phrases):
         logger.info(Text.message_valid.format(message_id, user_id, chat_id))
 
         if database.user_exists(user_id):
@@ -288,12 +296,7 @@ async def message_handler(
 
         return
 
-    await process_invalid_message(
-        message_id,
-        user_id,
-        chat_id,
-        database,
-    )
+    await process_invalid_message(bot, message_id, user_id, chat_id, database)
 
 
 @atexit.register
@@ -311,12 +314,12 @@ if __name__ == "__main__":
 
     database = Database("db.sqlite")
 
-    BOT = Bot(token=config.bot_token)
+    bot = Bot(token=config.bot_token)
 
     # Run the bot
     asyncio.run(
         dispatcher.start_polling(
-            BOT,
+            bot,
             config=config,
             database=database,
         ),
